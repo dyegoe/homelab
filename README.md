@@ -194,9 +194,14 @@ Principles:
 - **App-of-Apps** for the addon bundle (Cilium, observability, etc.) — a small, deliberate
   list. Not ApplicationSet, which solves a different problem (dynamic multi-cluster/multi-tenant
   fleets) this single-cluster homelab doesn't have.
-- Helm values live in real, git-tracked `values.yaml` files — never inlined as `valuesObject` in
-  the `Application` CRD, and never a wall of `helm --set` flags. Both are hard to diff/review in a
-  PR; a real values file is what makes a config change show up as an actual reviewable diff.
+- Helm values live in `apps/<app>/helm/values.yaml` — real, standalone YAML — rather than inlined
+  as `valuesObject` in the `Application` CRD. Both are equally visible in `git diff`/PR review,
+  since the `Application` object is itself git-tracked; the actual hard requirement is **never** a
+  wall of imperative `helm --set` flags, which get no diff at all. A standalone file still earns
+  its keep on tooling (`helm template`/`helm lint`/`helm diff` work directly against it, no
+  extraction needed), review signal (a values change and `Application`-plumbing change — sync
+  policy, `ignoreDifferences`, sync-wave — don't get bundled into the same file/diff), and it's
+  what keeps Kargo's rendering workflow (planned) clean to build on top of later.
 - Everything — including ArgoCD's own install — lives in this one repo. No separate
   `homelab-gitops` repo.
 
@@ -211,12 +216,19 @@ argocd/
 ├── apps.yaml                # Application: the addon App-of-Apps
 └── apps/
     ├── kustomization.yaml   # lists every addon Application
-    └── cilium.yaml          # Application: Cilium (multi-source: Helm chart + this repo's values)
+    ├── cilium.yaml          # Application: Cilium (multi-source: Helm chart + this repo's values)
+    └── gateway-crds.yaml    # Application: Gateway API CRDs, sourced directly from the upstream repo
 
 apps/
 └── cilium/
-    └── values.yaml          # Cilium Helm values (source of truth, never inlined)
+    └── helm/
+        └── values.yaml      # Cilium Helm values (source of truth, never inlined)
 ```
+
+Each addon gets an `apps/<app>/helm/values.yaml` — one `helm/` subdirectory per app. That leaves
+room for a sibling `apps/<app>/kustomization.yaml` (app-level, not under `helm/`) for any extra
+plain manifests the addon needs beyond what the Helm chart renders, combined into the same
+`Application` as a third source (see [Adding a new Application](#adding-a-new-application-the-pattern)).
 
 There is no separate "root" `Application`. `argocd/kustomization.yaml` is applied directly, once,
 and produces two top-level, self-syncing Applications:
@@ -298,9 +310,8 @@ spec:
       helm:
         releaseName: <app-name>
         valueFiles:
-          - $values/apps/<app-name>/values.yaml
+          - $values/apps/<app-name>/helm/values.yaml
     - repoURL: https://github.com/dyegoe/homelab.git
-      path: apps/<app-name>
       targetRevision: main
       ref: values
   destination:
@@ -328,15 +339,18 @@ spec:
 
 Steps:
 
-1. `apps/<app-name>/values.yaml` — the Helm values, as real YAML.
+1. `apps/<app-name>/helm/values.yaml` — the Helm values, as real YAML.
 2. `argocd/apps/<app-name>.yaml` — the `Application`, from the template above.
 3. Add `<app-name>.yaml` to `argocd/apps/kustomization.yaml`'s `resources`.
 4. Commit and push. `apps` (wave `-9`) picks up the new child `Application` automatically.
 
-For a plain-manifest source (no Helm chart — e.g. CRDs from a release URL) instead of steps 1–2,
-create `apps/<app-name>/kustomization.yaml` with a `resources:` entry pointing at the remote URL
-(the same trick `argocd/install/` uses for ArgoCD itself), and point a single-source `Application`
-at that path instead of the multi-source Helm shape above.
+For a plain-manifest addition (no Helm chart involved, or extra manifests alongside a chart — e.g.
+`gateway-crds`, or Cilium's BGP/LoadBalancerIPPool/HTTPRoute resources), point a source straight at
+the upstream repo's manifest directory when one exists (`gateway-crds.yaml` sources
+`kubernetes-sigs/gateway-api`'s `config/crd/experimental` path directly — no local mirror needed),
+or add an `apps/<app-name>/kustomization.yaml` in this repo for manifests you own yourself. Either
+way it's just another entry in the same `Application`'s `sources` list — no `ref`, since only the
+values-reference source needs that.
 
 ### Adopting existing (non-GitOps) resources
 
@@ -352,9 +366,10 @@ diagnose, because nothing rendered a reviewable diff before it reached the clust
 
 | Application | Sync wave | Automated | Notes                                                                                                                                                                                            |
 | ----------- | --------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `argocd`    | `-10`     | ✅         | Self-managed ArgoCD install                                                                                                                                                                      |
-| `apps`      | `-9`      | ✅         | App-of-Apps parent                                                                                                                                                                               |
-| `cilium`    | `-7`      | ⏳ pending | Adopted from the manual install above — automation enabled once the first-sync diff is confirmed clean (see [Adopting existing (non-GitOps) resources](#adopting-existing-non-gitops-resources)) |
+| `argocd`       | `-10` | ✅         | Self-managed ArgoCD install                                                                                                                                                                                             |
+| `apps`         | `-9`  | ✅         | App-of-Apps parent                                                                                                                                                                                                       |
+| `gateway-crds` | `-8`  | ✅         | Gateway API CRDs, sourced directly from `kubernetes-sigs/gateway-api`'s `config/crd/experimental` path                                                                                                                 |
+| `cilium`       | `-7`  | ⏳ pending | Adopted from the manual install above — automation enabled once the first-sync diff (including the still-pending BGP/LoadBalancerIPPool/HTTPRoute addition) is confirmed clean (see [Adopting existing (non-GitOps) resources](#adopting-existing-non-gitops-resources)) |
 
 ### Kargo (planned)
 

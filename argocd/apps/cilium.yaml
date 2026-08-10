@@ -18,9 +18,14 @@ spec:
         releaseName: cilium
         valueFiles:
           - $values/apps/cilium/helm/values.yaml
+    # Source to provide references for Helm values
     - repoURL: https://github.com/dyegoe/homelab.git
       targetRevision: main
       ref: values
+    # Source to provide references for Kustomize bases
+    - repoURL: https://github.com/dyegoe/homelab.git
+      targetRevision: main
+      path: apps/cilium
   destination:
     server: https://kubernetes.default.svc
     namespace: kube-system

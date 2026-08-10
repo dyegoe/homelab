@@ -52,12 +52,23 @@ README.md's `GitOps` section — that's the canonical reference. Summary for qui
   tracks the upstream `install.yaml` at a pinned tag via a Kustomize remote resource). Upgrading
   ArgoCD is a git change (bump the tag), never a manual `kubectl apply` again after bootstrap.
 - `argocd/apps.yaml` — the addon **App-of-Apps** (source: `argocd/apps/`, listing one `Application`
-  per addon, e.g. `cilium.yaml`). App-of-Apps, not ApplicationSet — this is a single 3-node cluster
-  with a small, deliberate addon list, not a dynamic multi-cluster/multi-tenant fleet.
-- Addon Helm values live in `apps/<name>/values.yaml` — real, git-tracked YAML, never inlined as
-  `valuesObject` in the `Application` CRD and never a wall of `helm --set` flags. Both are hard to
-  diff/review in a PR; this was a contributing factor in a real incident on this cluster (a wrong
-  `k8sServiceHost` value buried in a `--set` flag list took an hour to diagnose).
+  per addon, e.g. `cilium.yaml`, `gateway-crds.yaml`). App-of-Apps, not ApplicationSet — this is a
+  single 3-node cluster with a small, deliberate addon list, not a dynamic multi-cluster/
+  multi-tenant fleet.
+- Addon Helm values live in `apps/<name>/helm/values.yaml` — real, standalone YAML, one `helm/`
+  subdirectory per app. This is **not** because inline `valuesObject` is undiffable — it's equally
+  visible in `git diff`/PR review, since the `Application` object is itself git-tracked. The actual
+  hard rule is never a wall of imperative `helm --set` flags, which get no diff at all (this was the
+  real cause of a real incident on this cluster: a wrong `k8sServiceHost` value shipped via `--set`
+  and took an hour to diagnose, because nothing rendered a reviewable diff before it reached the
+  cluster). A standalone values file is still worth it on its own merits: local tooling (`helm
+  template`/`lint`/`diff` work directly against it), review signal (a values change and
+  `Application`-plumbing change don't get bundled in the same file/diff), and it's what keeps
+  Kargo's rendering workflow (planned) clean to build on later. Extra plain manifests an addon needs
+  beyond its Helm chart (e.g. Cilium's BGP/LoadBalancerIPPool/HTTPRoute config) go in a sibling
+  `apps/<name>/kustomization.yaml` (app-level, not under `helm/`), added as a third, non-`ref`
+  source on the same `Application` — see `gateway-crds.yaml` for the same idea applied to a
+  no-Helm-chart addon (sourced straight from the upstream repo's manifest directory).
 - **Adopting a resource already running from a manual `helm install`** (as Cilium was): leave
   `syncPolicy.automated` off on first commit, sync once manually, confirm the diff is clean, only
   then enable `automated: {prune: true, selfHeal: true}` in a follow-up commit.
