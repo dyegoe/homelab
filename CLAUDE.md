@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This repo sets up a homelab Kubernetes cluster running on Talos Linux. The cluster itself was
 bootstrapped manually (see README.md note on the pre-GitOps bootstrap process). GitOps via ArgoCD
-+ Kargo is the active next phase — see "GitOps direction" below for what's been decided so far.
+is live — ArgoCD manages its own installation plus an addon App-of-Apps (see "GitOps architecture"
+below and README.md's `GitOps` section for the full runbook). Kargo is planned on top but not yet
+implemented.
 
 ## Architecture
 
@@ -39,27 +41,30 @@ talosctl apply-config --insecure --nodes <node-ip> --file clusterconfig/k8s.node
 Use the generated `talosconfig` (copy to `~/.talos/config`) for subsequent authenticated
 `talosctl`/`kubectl` operations against the cluster.
 
-## GitOps direction
+## GitOps architecture
 
-Decided so far (as of the ArgoCD/Kargo planning discussion):
+Full runbook (bootstrap from zero, the Application template, how to add a new addon) lives in
+README.md's `GitOps` section — that's the canonical reference. Summary for quick orientation:
 
-- **Tooling**: ArgoCD for reconciliation, Kargo for promotion — not plain ArgoCD alone.
-- **Bootstrap pattern**: App-of-Apps (a root Application generating child Applications from a
-  `kustomization.yaml`) for the platform/addon bundle. This is a single 3-node cluster with a
-  small, deliberate addon list, so ApplicationSet is not needed here — it's meant for dynamic,
-  multi-cluster/multi-tenant fleets, which this isn't.
-- **Manifest rendering**: moving away from inlining full Helm `valuesObject` blocks directly in
-  `Application` CRDs (the previous repo's pattern) — that makes changes hard to diff/review and
-  was a contributing factor in a real incident on this cluster (a wrong `k8sServiceHost` value
-  buried in a `helm install --set` flag list took an hour to diagnose). Prefer Kargo's rendered
-  manifest workflow (`hydrateTo` + a review branch gated by PR) so config changes show up as an
-  actual Kubernetes-resource diff in a pull request before they reach the cluster.
-- **Repo layout**: GitOps manifests live in this same repo (not a separate `homelab-gitops` repo
-  like the previous setup) — everything for this cluster stays in one place.
-- **Kargo scope**: single Warehouse feeding a single Stage for now — used for its PR-gated
-  rendered-manifest review, not multi-environment promotion. This cluster is the only target;
-  design Warehouses/Stages accordingly (don't build out dev/staging/prod promotion chains that
-  have nothing to promote between).
+- `argocd/kustomization.yaml` is a **flat list** of top-level Applications, applied once
+  (`kubectl apply -k argocd/ --server-side`) to bootstrap. There is no separate "root" Application.
+- `argocd/argocd.yaml` — ArgoCD manages its **own installation** (source: `argocd/install/`, which
+  tracks the upstream `install.yaml` at a pinned tag via a Kustomize remote resource). Upgrading
+  ArgoCD is a git change (bump the tag), never a manual `kubectl apply` again after bootstrap.
+- `argocd/apps.yaml` — the addon **App-of-Apps** (source: `argocd/apps/`, listing one `Application`
+  per addon, e.g. `cilium.yaml`). App-of-Apps, not ApplicationSet — this is a single 3-node cluster
+  with a small, deliberate addon list, not a dynamic multi-cluster/multi-tenant fleet.
+- Addon Helm values live in `apps/<name>/values.yaml` — real, git-tracked YAML, never inlined as
+  `valuesObject` in the `Application` CRD and never a wall of `helm --set` flags. Both are hard to
+  diff/review in a PR; this was a contributing factor in a real incident on this cluster (a wrong
+  `k8sServiceHost` value buried in a `--set` flag list took an hour to diagnose).
+- **Adopting a resource already running from a manual `helm install`** (as Cilium was): leave
+  `syncPolicy.automated` off on first commit, sync once manually, confirm the diff is clean, only
+  then enable `automated: {prune: true, selfHeal: true}` in a follow-up commit.
+- Everything lives in this same repo — no separate `homelab-gitops` repo.
+- **Kargo** (not yet implemented): planned as a single Warehouse feeding a single Stage (this one
+  cluster) — used for its PR-gated rendered-manifest review, not multi-environment promotion. Don't
+  design dev/staging/prod promotion chains for this; there's nothing to promote between.
 
 ## Tooling
 
@@ -86,4 +91,6 @@ runs a command (checking pod/node status, logs, etc.) is always fine and encoura
   README.md — keep `talconfig.yaml` and README.md in sync when nodes change.
 - `installDisk` per node is `/dev/nvme0n1`; verify this matches actual hardware before applying to
   a new/replaced node.
-- This is not yet a git repository — there is no commit history or branch workflow to follow yet.
+- `origin` is `git@github.com:dyegoe/homelab.git`, branch `main`. ArgoCD's repo-access secret uses
+  the HTTPS form of the same URL (`https://github.com/dyegoe/homelab.git`) — keep that in mind if
+  the remote or credential type ever changes, since ArgoCD matches credentials by URL.

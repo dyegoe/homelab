@@ -12,7 +12,12 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
     - [TalOS installation](#talos-installation)
     - [Network CNI](#network-cni)
   - [GitOps](#gitops)
-    - [ArgoCD Bootstrap](#argocd-bootstrap)
+    - [Architecture](#architecture)
+    - [Bootstrap (from zero)](#bootstrap-from-zero)
+    - [Adding a new Application (the pattern)](#adding-a-new-application-the-pattern)
+    - [Adopting existing (non-GitOps) resources](#adopting-existing-non-gitops-resources)
+    - [Current Applications](#current-applications)
+    - [Kargo (planned)](#kargo-planned)
 
 ## Initial Cluster Setup
 
@@ -180,43 +185,179 @@ cilium status --wait
 
 ## GitOps
 
-> **Note**: Bootstrap steps will be documented here once implemented. Direction decided so far:
+This cluster is managed via [ArgoCD](https://argo-cd.readthedocs.io/), including its own
+installation — ArgoCD manages itself. [Kargo](https://kargo.io/) is planned on top of this for
+promotion and rendered-manifest review; see [Kargo (planned)](#kargo-planned) — not implemented yet.
 
-- **ArgoCD** for reconciliation, **Kargo** for promotion and rendered-manifest review — not ArgoCD alone.
-- **App-of-Apps** for the platform/addon bundle (Cilium, CoreDNS, observability, etc.) — a small,
-  deliberate list. Not ApplicationSet, which is for dynamic multi-cluster fleets this isn't.
-- Manifests are **rendered** (via Kargo's `hydrateTo` + a PR-gated review branch) rather than
-  inlining full Helm values blocks into `Application` CRDs, so config changes show up as an actual
-  Kubernetes-resource diff before reaching the cluster.
-- **Single Warehouse → single Stage** (this one cluster) — Kargo is used for its promotion-review
-  safety net here, not multi-environment promotion.
-- Everything lives in this repo — no separate `homelab-gitops` repo.
+Principles:
 
-### ArgoCD Bootstrap
+- **App-of-Apps** for the addon bundle (Cilium, observability, etc.) — a small, deliberate
+  list. Not ApplicationSet, which solves a different problem (dynamic multi-cluster/multi-tenant
+  fleets) this single-cluster homelab doesn't have.
+- Helm values live in real, git-tracked `values.yaml` files — never inlined as `valuesObject` in
+  the `Application` CRD, and never a wall of `helm --set` flags. Both are hard to diff/review in a
+  PR; a real values file is what makes a config change show up as an actual reviewable diff.
+- Everything — including ArgoCD's own install — lives in this one repo. No separate
+  `homelab-gitops` repo.
+
+### Architecture
+
+```text
+argocd/
+├── kustomization.yaml       # flat list of top-level Applications, applied once to bootstrap
+├── argocd.yaml              # Application: ArgoCD's own installation (self-managed)
+├── install/
+│   └── kustomization.yaml   # tracks the upstream install.yaml (pinned tag) as a remote resource
+├── apps.yaml                # Application: the addon App-of-Apps
+└── apps/
+    ├── kustomization.yaml   # lists every addon Application
+    └── cilium.yaml          # Application: Cilium (multi-source: Helm chart + this repo's values)
+
+apps/
+└── cilium/
+    └── values.yaml          # Cilium Helm values (source of truth, never inlined)
+```
+
+There is no separate "root" `Application`. `argocd/kustomization.yaml` is applied directly, once,
+and produces two top-level, self-syncing Applications:
+
+| Application | Sync wave | Source           | Purpose                                                     |
+| ----------- | --------- | ---------------- | ----------------------------------------------------------- |
+| `argocd`    | `-10`     | `argocd/install` | ArgoCD manages its own installation/upgrades                |
+| `apps`      | `-9`      | `argocd/apps`    | App-of-Apps: owns every addon `Application` (e.g. `cilium`) |
+
+Both run with `syncPolicy.automated: {prune: true, selfHeal: true}` — once bootstrapped, upgrading
+ArgoCD or adding/changing an addon is a git commit, not a `kubectl`/`helm` command.
+
+### Bootstrap (from zero)
+
+Two phases: a one-time **imperative** install to get ArgoCD running at all (it has to exist before
+it can manage itself), then handing over to GitOps.
+
+**Day 0 — imperative, one-time:**
 
 ```bash
-# Create the argocd namespace
+# Namespace for ArgoCD
 kubectl create namespace argocd
 
-# Create a secret for repository access
+# Repo access credentials (used by ArgoCD's repo-server; scope the PAT to this repo, read-only)
 kubectl -n argocd create secret generic repo-homelab \
   --from-literal=type=git \
   --from-literal=url=https://github.com/dyegoe/homelab.git \
   --from-literal=username=dyegoe \
   --from-literal=password=$(op item get "GitHub Personal Access Token argocd" --fields token --reveal)
-
-# Label the secret as a repository type for ArgoCD
 kubectl -n argocd label secret repo-homelab argocd.argoproj.io/secret-type=repository
 
-# Install ArgoCD using the official manifests (v3.5.0)
+# Install ArgoCD (pin the version — check https://github.com/argoproj/argo-cd/releases for latest)
 kubectl -n argocd apply -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.0/manifests/install.yaml --server-side --force-conflicts
-
-# Check the status of the ArgoCD server deployment
 kubectl -n argocd rollout status deployment argocd-server
 
-# Get the initial admin password for ArgoCD
-kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+# Initial admin password — delete the argocd-initial-admin-secret once access/SSO is confirmed
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
 
-# Forward the ArgoCD server port to localhost
+# UI access
 kubectl -n argocd port-forward svc/argocd-server 8080:443
 ```
+
+**Day 1 — hand over to GitOps:**
+
+```bash
+kubectl apply -k argocd/ --server-side
+```
+
+This applies the two top-level `Application` objects described above. From this point on:
+
+- **Never re-run the imperative `install.yaml` apply again.** Upgrading ArgoCD is done by bumping
+  the pinned tag in `argocd/install/kustomization.yaml` and pushing.
+- **Never `helm install`/`helm upgrade` an addon by hand again** once it's under an `Application` —
+  edit its values file and push instead.
+- The first sync of `argocd.yaml` may show a field-manager conflict — the running install was
+  applied imperatively with `kubectl --server-side --force-conflicts`, a different field manager
+  than ArgoCD's own controller takes over with. Expected on this first handover, not a bug.
+
+### Adding a new Application (the pattern)
+
+Every addon follows the same shape:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: <app-name>
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "<wave>" # negative = earlier; foundational addons (CNI, CSI) go first
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io # cascade-delete on Application deletion
+spec:
+  project: default
+  sources:
+    - repoURL: <helm-repo-or-oci-url>
+      chart: <chart-name>
+      targetRevision: <pinned-chart-version> # always pin — never `*` or a floating tag
+      helm:
+        releaseName: <app-name>
+        valueFiles:
+          - $values/apps/<app-name>/values.yaml
+    - repoURL: https://github.com/dyegoe/homelab.git
+      path: apps/<app-name>
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: <target-namespace>
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  ignoreDifferences:
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      jsonPointers:
+        - /spec/conversion/webhook/clientConfig/caBundle
+```
+
+Steps:
+
+1. `apps/<app-name>/values.yaml` — the Helm values, as real YAML.
+2. `argocd/apps/<app-name>.yaml` — the `Application`, from the template above.
+3. Add `<app-name>.yaml` to `argocd/apps/kustomization.yaml`'s `resources`.
+4. Commit and push. `apps` (wave `-9`) picks up the new child `Application` automatically.
+
+For a plain-manifest source (no Helm chart — e.g. CRDs from a release URL) instead of steps 1–2,
+create `apps/<app-name>/kustomization.yaml` with a `resources:` entry pointing at the remote URL
+(the same trick `argocd/install/` uses for ArgoCD itself), and point a single-source `Application`
+at that path instead of the multi-source Helm shape above.
+
+### Adopting existing (non-GitOps) resources
+
+If software is already running from a manual `helm install`/`kubectl apply` (as Cilium was, before
+this pattern existed): **do not** set `syncPolicy.automated` on its first commit. Push it with
+automation off, sync once manually (`argocd app sync <name>`, or via the UI), and confirm the diff
+is empty or exactly what's expected — *before* enabling `automated: {prune: true, selfHeal: true}`
+in a follow-up commit. This is the guardrail that would have caught the incident that motivated
+this whole approach: a wrong Cilium value shipped via a raw `--set` flag and took an hour to
+diagnose, because nothing rendered a reviewable diff before it reached the cluster.
+
+### Current Applications
+
+| Application | Sync wave | Automated | Notes                                                                                                                                                                                            |
+| ----------- | --------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `argocd`    | `-10`     | ✅         | Self-managed ArgoCD install                                                                                                                                                                      |
+| `apps`      | `-9`      | ✅         | App-of-Apps parent                                                                                                                                                                               |
+| `cilium`    | `-7`      | ⏳ pending | Adopted from the manual install above — automation enabled once the first-sync diff is confirmed clean (see [Adopting existing (non-GitOps) resources](#adopting-existing-non-gitops-resources)) |
+
+### Kargo (planned)
+
+Not yet implemented. Planned scope: a single Warehouse feeding a single Stage (this one cluster) —
+used for its PR-gated rendered-manifest review (Kargo's `hydrateTo` + a review branch), not
+multi-environment promotion. This section will be filled in once bootstrapped.
