@@ -18,6 +18,10 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
     - [Adopting existing (non-GitOps) resources](#adopting-existing-non-gitops-resources)
     - [Current Applications](#current-applications)
     - [Kargo (planned)](#kargo-planned)
+    - [Rotating the ArgoCD repo credential](#rotating-the-argocd-repo-credential)
+  - [Advanced Networking](#advanced-networking)
+    - [Mikrotik BGP configuration](#mikrotik-bgp-configuration)
+  - [Overall setup summary and sequence](#overall-setup-summary-and-sequence)
 
 ## Initial Cluster Setup
 
@@ -182,6 +186,8 @@ helm install cilium cilium/cilium \
 # Check Cilium status
 cilium status --wait
 ```
+
+For BGP configuration, refer to the [Advanced Networking](#advanced-networking) section below.
 
 ## GitOps
 
@@ -364,15 +370,61 @@ diagnose, because nothing rendered a reviewable diff before it reached the clust
 
 ### Current Applications
 
-| Application | Sync wave | Automated | Notes                                                                                                                                                                                            |
-| ----------- | --------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `argocd`       | `-10` | ✅         | Self-managed ArgoCD install                                                                                                                                                                                             |
-| `apps`         | `-9`  | ✅         | App-of-Apps parent                                                                                                                                                                                                       |
-| `gateway-crds` | `-8`  | ✅         | Gateway API CRDs, sourced directly from `kubernetes-sigs/gateway-api`'s `config/crd/experimental` path                                                                                                                 |
-| `cilium`       | `-7`  | ⏳ pending | Adopted from the manual install above — automation enabled once the first-sync diff (including the still-pending BGP/LoadBalancerIPPool/HTTPRoute addition) is confirmed clean (see [Adopting existing (non-GitOps) resources](#adopting-existing-non-gitops-resources)) |
+| Application    | Sync wave | Automated | Notes                                                                                                                                                                                                                                                                    |
+| -------------- | --------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `argocd`       | `-10`     | ✅         | Self-managed ArgoCD install                                                                                                                                                                                                                                              |
+| `apps`         | `-9`      | ✅         | App-of-Apps parent                                                                                                                                                                                                                                                       |
+| `gateway-crds` | `-8`      | ✅         | Gateway API CRDs, sourced directly from `kubernetes-sigs/gateway-api`'s `config/crd/experimental` path                                                                                                                                                                   |
+| `cilium`       | `-7`      | ⏳ pending | Adopted from the manual install above — automation enabled once the first-sync diff (including the still-pending BGP/LoadBalancerIPPool/HTTPRoute addition) is confirmed clean (see [Adopting existing (non-GitOps) resources](#adopting-existing-non-gitops-resources)) |
 
 ### Kargo (planned)
 
 Not yet implemented. Planned scope: a single Warehouse feeding a single Stage (this one cluster) —
 used for its PR-gated rendered-manifest review (Kargo's `hydrateTo` + a review branch), not
 multi-environment promotion. This section will be filled in once bootstrapped.
+
+### Rotating the ArgoCD repo credential
+
+The Secret `argocd/repo-homelab-gitops` (created during [Bootstrap ArgoCD](#bootstrap-from-zero)) holds the GitHub fine-grained PAT that ArgoCD uses to read this repository. It is intentionally **not** GitOps-managed: it is the chicken-and-egg credential that must exist before ArgoCD can sync anything (including the 1Password Operator that could otherwise reconcile it). The PAT is read-only and rotates roughly every 90 days, so manual rotation is the chosen trade-off.
+
+**Source of truth:** 1Password item `GitHub Personal Access Token argocd`, field `token`.
+
+When ArgoCD starts failing to fetch the repo (auth errors, `ComparisonError` across many apps), rotate the PAT in 1Password, then patch the Secret in place:
+
+```bash
+kubectl -n argocd patch secret repo-homelab-gitops \
+  --type=merge \
+  -p "{\"stringData\":{\"password\":\"$(op item get 'GitHub Personal Access Token argocd' --fields token --reveal)\"}}"
+```
+
+Verify the connection recovered:
+
+```bash
+argocd repo get https://github.com/dyegoe/homelab-gitops.git   # STATUS should be Successful
+argocd app list | awk 'NR==1 || /Unknown|ComparisonError/'     # should be empty after a refresh
+```
+
+If apps are still showing stale `ComparisonError`, refresh them (`argocd app get <name> --refresh`) — the auto-sync loop also picks up the new credential within a few minutes.
+
+## Advanced Networking
+
+> **Note**: This section is a work in progress. It will be filled in once the Cilium BGP/LoadBalancerIPPool/HTTPRoute resources are fully configured and tested.
+
+### Mikrotik BGP configuration
+
+```routeros
+/routing/bgp/instance/add name=k8s as=64512 router-id=172.31.86.1
+/routing/bgp/template/add name=k8s as=64512 afi=ip
+/routing/bgp/connection/add name=k8s instance=k8s remote.address=172.31.86.0/24 remote.as=64512 local.address=172.31.86.1 local.role=ibgp listen=yes routing-table=main templates=k8s as=64512 afi=ip
+```
+
+## Overall setup summary and sequence
+
+1. Boot TalOS on each node from the USB stick and apply the TalOS config files.
+2. Bootstrap the first node (kihnu.nodes.ee) and initialize the cluster.
+3. Apply Gateway API CRDs (imperative, one-time).
+4. Install Cilium via Helm.
+5. Install ArgoCD (imperative, one-time).
+6. Hand over to GitOps by applying `argocd/` kustomization.
+7. Apply Cilium BGP/LoadBalancerIPPool via GitOps
+8. Apply Sealed Secrets via GitOps

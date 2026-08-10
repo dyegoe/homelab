@@ -31,6 +31,9 @@ spec:
     namespace: kube-system
   # Deliberately no `automated` syncPolicy yet — see Phase 8.
   syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
     syncOptions:
       - ServerSideApply=true
     retry:
