@@ -91,11 +91,45 @@ To generate the proper TalOS config files, you need to install `talosctl` on you
 curl -sL https://talos.dev/install | sudo sh
 ```
 
+Ensure that you have `age` installed on your local machine. You can install it by running the following command:
+
+```bash
+sudo dnf install age -y
+```
+
+You also need to install `sops` on your local machine. You can download the latest release from the [sops GitHub releases page](https://github.com/getsops/sops/releases)
+
+```bash
+# Create sops configuration dir to store the age key
+mkdir -p $XDG_CONFIG_HOME/sops/age
+
+# Generate an age key pair
+age-keygen -o $XDG_CONFIG_HOME/sops/age/keys.txt
+
+# The command above will output the public key, which you will need to add to the sops configuration file
+```
+
 Now you can generate the TalOS config files by running the following command:
 
 ```bash
 # From this repository root
 cd talos
+
+# Create .sops.yaml file with the age public key
+cat <<EOF > .sops.yaml
+---
+creation_rules:
+  - age: >-
+      age1sse7e289gefyre7tdrv4g9hudldyypvhsvz23ph6t73zhd0uhf8sevp2v4
+EOF
+
+# Generate the TalOS secrets
+talhelper gensecret > talsecret.sops.yaml
+
+# Encrypt the TalOS secrets using sops
+sops -e -i talsecret.sops.yaml
+
+# Generate the TalOS config files
 talhelper genconfig
 ```
 

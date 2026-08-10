@@ -17,6 +17,9 @@ controlPlane:
         proxy:
           disabled: true # Strict kube-proxy-less mode
       machine:
+        kubelet:
+          extraArgs:
+            rotate-server-certificates: "true"
         network:
           interfaces:
             - deviceSelector:
