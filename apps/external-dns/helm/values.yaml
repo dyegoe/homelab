@@ -1,0 +1,22 @@
+---
+provider: cloudflare
+domainFilters:
+  - nodes.ee
+policy: sync
+sources:
+  - service
+  - ingress
+  - gateway-httproute
+  - gateway-grpcroute
+deploymentAnnotations:
+  operator.1password.io/item-path: "vaults/Kubernetes/items/cloudflare-personal-api-token-home-lab"
+  operator.1password.io/item-name: "cloudflare-api-token"
+serviceMonitor:
+  enabled: false # TODO: Enable this once we have a Prometheus instance in the cluster
+  interval: 30s
+env:
+  - name: CF_API_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: cloudflare-api-token
+        key: credential

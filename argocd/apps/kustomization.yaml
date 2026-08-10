@@ -5,4 +5,6 @@ resources:
   - gateway-crds.yaml
   - cilium.yaml
   - sealed-secrets.yaml
+  - metrics-server.yaml
   - onepassword.yaml
+  - cert-manager.yaml

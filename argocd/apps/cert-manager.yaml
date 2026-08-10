@@ -1,0 +1,46 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://charts.jetstack.io
+      chart: cert-manager
+      targetRevision: v1.21.1
+      helm:
+        releaseName: cert-manager
+        valuesObject:
+          crds:
+            enabled: true
+          config:
+            enableGatewayAPI: true
+          prometheus:
+            enabled: false # TODO: Enable Prometheus metrics once we have a Prometheus instance in the cluster
+            servicemonitor:
+              enabled: false # TODO: Enable Prometheus metrics once we have a Prometheus instance in the cluster
+              interval: 30s
+    - repoURL: https://github.com/dyegoe/homelab.git
+      path: apps/cert-manager
+      targetRevision: main
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
