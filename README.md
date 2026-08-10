@@ -197,4 +197,26 @@ cilium status --wait
 ```bash
 # Create the argocd namespace
 kubectl create namespace argocd
+
+# Create a secret for repository access
+kubectl -n argocd create secret generic repo-homelab \
+  --from-literal=type=git \
+  --from-literal=url=https://github.com/dyegoe/homelab.git \
+  --from-literal=username=dyegoe \
+  --from-literal=password=$(op item get "GitHub Personal Access Token argocd" --fields token --reveal)
+
+# Label the secret as a repository type for ArgoCD
+kubectl -n argocd label secret repo-homelab argocd.argoproj.io/secret-type=repository
+
+# Install ArgoCD using the official manifests (v3.5.0)
+kubectl -n argocd apply -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.0/manifests/install.yaml --server-side --force-conflicts
+
+# Check the status of the ArgoCD server deployment
+kubectl -n argocd rollout status deployment argocd-server
+
+# Get the initial admin password for ArgoCD
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+
+# Forward the ArgoCD server port to localhost
+kubectl -n argocd port-forward svc/argocd-server 8080:443
 ```

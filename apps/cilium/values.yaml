@@ -1,0 +1,43 @@
+---
+kubeProxyReplacement: true
+k8sServiceHost: 172.31.86.10
+k8sServicePort: 6443
+routingMode: native
+ipv4NativeRoutingCIDR: 10.0.0.0/8
+autoDirectNodeRoutes: true
+endpointRoutes:
+  enabled: true
+bpf:
+  masquerade: true
+  monitorAggregation: none
+socketLB:
+  enabled: true
+cgroup:
+  autoMount:
+    enabled: false
+  hostRoot: /sys/fs/cgroup
+securityContext:
+  privileged: true
+ipam:
+  mode: kubernetes
+gatewayAPI:
+  enabled: true
+  enableAlpn: true
+bgpControlPlane:
+  enabled: true
+hubble:
+  enabled: true
+  relay:
+    enabled: true
+  ui:
+    enabled: true
+  metrics:
+    enabled:
+      - dns
+      - drop
+      - flow
+      - flows-to-world
+      - httpV2
+      - icmp
+      - port-distribution
+      - tcp
