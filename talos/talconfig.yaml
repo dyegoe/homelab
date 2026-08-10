@@ -1,0 +1,45 @@
+clusterName: k8s.nodes.ee
+endpoint: https://172.31.86.10:6443
+
+# The Talos version to run
+talosVersion: v1.13.8
+kubernetesVersion: v1.36.2
+
+# Apply these baseline configurations to ALL nodes
+controlPlane:
+  talosImageURL: factory.talos.dev/metal-installer-secureboot/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245
+  patches:
+    - |-
+      cluster:
+        network:
+          cni:
+            name: none # Bypassing default CNI for Cilium
+        proxy:
+          disabled: true # Strict kube-proxy-less mode
+      machine:
+        network:
+          interfaces:
+            - deviceSelector:
+                physical: true
+              dhcp: true
+              vip:
+                ip: 172.31.86.10 # Your native Talos VIP
+
+allowSchedulingOnMasters: true
+
+# Define your specific hardware nodes
+nodes:
+  - hostname: kihnu.nodes.ee
+    ipAddress: 172.31.86.11
+    controlPlane: true
+    installDisk: /dev/nvme0n1
+
+  - hostname: muhu.nodes.ee
+    ipAddress: 172.31.86.12
+    controlPlane: true
+    installDisk: /dev/nvme0n1
+
+  - hostname: ruhnu.nodes.ee
+    ipAddress: 172.31.86.13
+    controlPlane: true
+    installDisk: /dev/nvme0n1
