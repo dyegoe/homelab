@@ -8,3 +8,4 @@ resources:
   - metrics-server.yaml
   - onepassword.yaml
   - cert-manager.yaml
+  - external-dns.yaml
