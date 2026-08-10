@@ -490,6 +490,6 @@ For more information, refer to the [official documentation](https://developer.1p
 5. Install ArgoCD (imperative, one-time).
 6. Hand over to GitOps by applying `argocd/` kustomization.
 7. Apply Cilium BGP/LoadBalancerIPPool via GitOps
-8. Apply Sealed Secrets and Metrics Server via GitOps
+8. Apply Sealed Secrets, Metrics Server, and Kubelet Serving Cert Approver via GitOps
 9. Apply 1Password Operator via GitOps
-10. Apply Cert-manager and External-DNS via GitOps
+10. Apply Cert-manager, and External-DNS via GitOps

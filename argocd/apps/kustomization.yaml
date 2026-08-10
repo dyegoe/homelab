@@ -6,6 +6,7 @@ resources:
   - cilium.yaml
   - sealed-secrets.yaml
   - metrics-server.yaml
+  - kubelet-serving-cert-approver.yaml
   - onepassword.yaml
   - cert-manager.yaml
   - external-dns.yaml
