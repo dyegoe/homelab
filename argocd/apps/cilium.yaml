@@ -17,9 +17,8 @@ spec:
       helm:
         releaseName: cilium
         valueFiles:
-          - $values/apps/cilium/values.yaml
+          - $values/apps/cilium/helm/values.yaml
     - repoURL: https://github.com/dyegoe/homelab.git
-      path: apps/cilium
       targetRevision: main
       ref: values
   destination:
