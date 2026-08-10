@@ -21,6 +21,9 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
     - [Rotating the ArgoCD repo credential](#rotating-the-argocd-repo-credential)
   - [Advanced Networking](#advanced-networking)
     - [Mikrotik BGP configuration](#mikrotik-bgp-configuration)
+  - [1Password Operator](#1password-operator)
+    - [Installation](#installation)
+    - [How to use](#how-to-use)
   - [Overall setup summary and sequence](#overall-setup-summary-and-sequence)
 
 ## Initial Cluster Setup
@@ -418,6 +421,66 @@ If apps are still showing stale `ComparisonError`, refresh them (`argocd app get
 /routing/bgp/connection/add name=k8s instance=k8s remote.address=172.31.86.0/24 remote.as=64512 local.address=172.31.86.1 local.role=ibgp listen=yes routing-table=main templates=k8s as=64512 afi=ip
 ```
 
+## 1Password Operator
+
+### Installation
+
+Create the 1Password connect server. This will output a file `1password-credentials.json`.
+
+```bash
+op connect server create kubernetes-homelab --vaults Kubernetes
+```
+
+Create the 1Password connect token for the operator to use. Save the output token securely.
+
+```bash
+op connect token create kubernetes-operator --server kubernetes-homelab --vault Kubernetes
+```
+
+Create a sealed secret for the credentials file.
+
+```bash
+kubectl create secret generic onepassword-connect-credentials --from-file=1password-credentials.json=./1password-credentials.json --namespace onepassword --dry-run=client -o yaml > raw-credentials.yaml
+kubeseal -o yaml < raw-credentials.yaml > sealedsecret-onepassword-connect-credentials.yaml
+kubectl create secret generic onepassword-connect-token --from-literal=token="<your-token-here>" --namespace onepassword --dry-run=client -o yaml > raw-token.yaml
+kubeseal -o yaml < raw-token.yaml > sealedsecret-onepassword-connect-token.yaml
+```
+
+Remove the raw files.
+
+```bash
+rm raw-*.yaml 1password-credentials.json
+```
+
+### How to use
+
+You can create a OnePasswordItem resource to fetch secrets from 1Password. For example:
+
+```yaml
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: SECRET_NAME
+spec:
+  itemPath: "vaults/VAULT/items/ITEM"
+```
+
+Or use the Deployment annotation to inject secrets directly into pods:
+
+```yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deployment-example
+  annotations:
+    operator.1password.io/item-path: "vaults/VAULT/items/ITEM"
+    operator.1password.io/item-name: "SECRET_NAME"
+```
+
+For more information, refer to the [official documentation](https://developer.1password.com/docs/k8s/operator/).
+
 ## Overall setup summary and sequence
 
 1. Boot TalOS on each node from the USB stick and apply the TalOS config files.
@@ -428,3 +491,4 @@ If apps are still showing stale `ComparisonError`, refresh them (`argocd app get
 6. Hand over to GitOps by applying `argocd/` kustomization.
 7. Apply Cilium BGP/LoadBalancerIPPool via GitOps
 8. Apply Sealed Secrets via GitOps
+9. Apply 1Password Operator via GitOps
