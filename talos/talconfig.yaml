@@ -1,3 +1,4 @@
+---
 clusterName: k8s.nodes.ee
 endpoint: https://172.31.86.10:6443
 
