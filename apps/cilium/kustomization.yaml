@@ -6,3 +6,5 @@ resources:
   - ciliumbgpclusterconfig-default.yaml
   - ciliumbgppeerconfig-default.yaml
   - ciliumloadbalancerippool-cilium-lb-pool.yaml
+  - httproute-hubble-redirect.yaml
+  - httproute-hubble.yaml

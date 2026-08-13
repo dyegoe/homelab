@@ -527,3 +527,6 @@ For more information, refer to the [official documentation](https://developer.1p
 8. Apply Sealed Secrets, Metrics Server, and Kubelet Serving Cert Approver via GitOps
 9. Apply 1Password Operator via GitOps
 10. Apply Cert-manager, and External-DNS via GitOps
+11. Apply Gateway API via GitOps
+12. Apply Hubble Gateway API resources via GitOps
+13. Apply ArgoCD Gateway API resources and patches via GitOps

@@ -10,3 +10,4 @@ resources:
   - onepassword.yaml
   - cert-manager.yaml
   - external-dns.yaml
+  - gateway.yaml

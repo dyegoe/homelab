@@ -3,3 +3,15 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.0/manifests/install.yaml
+  - grpcroute-argocd-grpc.yaml
+  - httproute-argocd-redirect.yaml
+  - httproute-argocd.yaml
+patches:
+  - path: patch-deployments.yaml
+    target:
+      kind: Deployment
+  - path: patch-configmap-argocd-cm.yaml
+  - path: patch-configmap-argocd-cmd-params-cm.yaml
+  - path: patch-configmap-argocd-rbac-cm.yaml
+  - path: patch-secret-argocd-secret.yaml
+  - path: patch-service-argocd-server.yaml
