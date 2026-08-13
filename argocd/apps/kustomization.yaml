@@ -11,3 +11,4 @@ resources:
   - cert-manager.yaml
   - external-dns.yaml
   - gateway.yaml
+  - cloudflared.yaml
