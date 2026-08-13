@@ -2,7 +2,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: gateway-crds
+  name: snapshot-crds
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "-8"
@@ -11,9 +11,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/kubernetes-sigs/gateway-api
-    path: config/crd/experimental
-    targetRevision: v1.6.1
+    repoURL: https://github.com/kubernetes-csi/external-snapshotter
+    path: client/config/crd
+    targetRevision: v8.6.0
   destination:
     server: https://kubernetes.default.svc
   syncPolicy:
