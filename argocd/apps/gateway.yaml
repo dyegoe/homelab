@@ -16,7 +16,7 @@ spec:
       targetRevision: main
   destination:
     server: https://kubernetes.default.svc
-    namespace: gateway
+    namespace: apps/gateway
   syncPolicy:
     automated:
       prune: true
