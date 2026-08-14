@@ -29,7 +29,6 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: kube-system
-  # Deliberately no `automated` syncPolicy yet — see Phase 8.
   syncPolicy:
     automated:
       prune: true
