@@ -1,0 +1,33 @@
+preUpgradeChecker:
+  jobEnabled: false
+defaultSettings:
+  # Automatically use the available space on /var/mnt/longhorn
+  createDefaultDiskLabeledNodes: false
+  defaultDataPath: /var/mnt/longhorn
+  defaultReplicaCount: 3
+  replicaSoftAntiAffinity: true
+  storageMinimalAvailablePercentage: 10
+  guaranteedInstanceManagerCPU: 12
+  upgradeChecker: false
+persistence:
+  defaultClass: true
+  defaultClassReplicaCount: 3
+  reclaimPolicy: Retain
+csi:
+  kubeletRootDir: /var/lib/kubelet
+metrics:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+longhornUI:
+  replicas: 1
+httproute:
+  enabled: true
+  parentRefs:
+    - namespace: gateway # Using central gateway in "gateway" namespace
+      name: core
+      sectionName: https # Target specific listener
+  hostnames:
+    - longhorn.nodes.ee
+  path: /
+  pathType: PathPrefix

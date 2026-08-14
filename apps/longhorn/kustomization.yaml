@@ -1,0 +1,7 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - clusterrole-longhorn-csi-resizer-vac.yaml
+  - clusterrolebinding-longhorn-csi-resizer-vac.yaml
+  - httproute-longhorn-redirect.yaml
