@@ -122,3 +122,10 @@ grafana:
   grafana.ini:
     server:
       root_url: https://grafana.nodes.ee
+  # Loki isn't part of this chart, so unlike Prometheus/Alertmanager it isn't auto-provisioned -
+  # has to be added by hand.
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      access: proxy
+      url: http://loki.monitoring.svc.cluster.local:3100
