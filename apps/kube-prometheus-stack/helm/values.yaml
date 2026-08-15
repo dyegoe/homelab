@@ -25,6 +25,12 @@ kubeProxy:
 prometheus:
   prometheusSpec:
     retention: 15d
+    # The bundled "kubernetes-mixin" dashboards (Compute Resources / Namespace, Pod, Workload, ...)
+    # all key off a hidden $cluster template variable sourced from this label. Without it, every
+    # metric has no `cluster` label at all, the variable resolves to nothing, and those panels
+    # show "No data" even though the underlying data is fine.
+    externalLabels:
+      cluster: k8s.nodes.ee
     # nil selectors would otherwise only pick up ServiceMonitors/PodMonitors/PrometheusRules
     # labeled `release: kube-prometheus-stack` - every other addon's ServiceMonitor (cilium,
     # cert-manager, external-dns, onepassword, longhorn, cloudflared) is unlabeled, so this has
