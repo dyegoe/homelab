@@ -30,6 +30,13 @@ spec:
     server: https://kubernetes.default.svc
     namespace: monitoring
   syncPolicy:
+    # node-exporter needs hostNetwork/hostPID/hostPath/hostPort, which Talos's default
+    # baseline PodSecurity level for new namespaces rejects (same fix as longhorn-system).
+    managedNamespaceMetadata:
+      labels:
+        pod-security.kubernetes.io/enforce: privileged
+        pod-security.kubernetes.io/warn: privileged
+        pod-security.kubernetes.io/audit: privileged
     automated:
       prune: true
       selfHeal: true
