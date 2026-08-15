@@ -12,7 +12,7 @@ deploymentAnnotations:
   operator.1password.io/item-path: "vaults/Kubernetes/items/cloudflare-personal-api-token-home-lab"
   operator.1password.io/item-name: "cloudflare-api-token"
 serviceMonitor:
-  enabled: false # TODO: Enable this once we have a Prometheus instance in the cluster
+  enabled: true
   interval: 30s
 env:
   - name: CF_API_TOKEN

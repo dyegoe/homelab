@@ -2,36 +2,29 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: cert-manager
+  name: loki
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-4"
+    argocd.argoproj.io/sync-wave: "-1"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   sources:
-    - repoURL: https://charts.jetstack.io
-      chart: cert-manager
-      targetRevision: v1.21.1
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: loki
+      targetRevision: 7.3.0
       helm:
-        releaseName: cert-manager
-        valuesObject:
-          crds:
-            enabled: true
-          config:
-            enableGatewayAPI: true
-          prometheus:
-            enabled: true
-            servicemonitor:
-              enabled: true
-              interval: 30s
+        releaseName: loki
+        valueFiles:
+          - $values/apps/loki/helm/values.yaml
+    # Source to provide references for Helm values
     - repoURL: https://github.com/dyegoe/homelab.git
-      path: apps/cert-manager
       targetRevision: main
+      ref: values
   destination:
     server: https://kubernetes.default.svc
-    namespace: cert-manager
+    namespace: monitoring
   syncPolicy:
     automated:
       prune: true

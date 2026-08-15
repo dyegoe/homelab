@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - gateway-crds.yaml
   - snapshot-crds.yaml
+  - prometheus-operator-crds.yaml
   - cilium.yaml
   - sealed-secrets.yaml
   - metrics-server.yaml
@@ -14,3 +15,6 @@ resources:
   - gateway.yaml
   - cloudflared.yaml
   - longhorn.yaml
+  - kube-prometheus-stack.yaml
+  - loki.yaml
+  - alloy.yaml

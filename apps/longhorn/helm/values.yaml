@@ -17,7 +17,7 @@ csi:
   kubeletRootDir: /var/lib/kubelet
 metrics:
   serviceMonitor:
-    enabled: false
+    enabled: true
     interval: 30s
 longhornUI:
   replicas: 1

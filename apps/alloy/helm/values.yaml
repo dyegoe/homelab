@@ -1,0 +1,97 @@
+---
+alloy:
+  # otelcol.receiver.tcplog (used below to ingest Talos's json_lines log stream) is still
+  # experimental in Alloy - bump the whole minimum stability level to unlock it.
+  stabilityLevel: "experimental"
+  # Extra listener for Talos's `machine.logging.destinations` json_lines stream (see
+  # talos/talconfig.yaml - the endpoint has to be added to the control-plane patch there).
+  extraPorts:
+    - name: talos-logs
+      port: 5140
+      targetPort: 5140
+      protocol: TCP
+  # This is a DaemonSet (one pod per node); requests/limits are per-pod, not cluster-wide.
+  # 760Mi is what the old log-shipper on this same hardware needed after two OOMKill-driven
+  # bumps (512Mi -> 640Mi -> 760Mi) - carried over as a starting point, watch for OOMKills.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 760Mi
+  configMap:
+    content: |-
+      // Pod logs: discover every pod in the cluster and tail its container logs straight from
+      // the kubelet API (no /var/log hostPath mount needed).
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      discovery.relabel "pods" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_node_name"]
+          target_label  = "node"
+        }
+      }
+
+      loki.source.kubernetes "pods" {
+        targets    = discovery.relabel.pods.output
+        forward_to = [loki.write.default.receiver]
+      }
+
+      // Talos logs: machine (kernel + service) logs shipped as newline-delimited JSON over TCP,
+      // per https://docs.siderolabs.com/talos/v1.13/configure-your-talos-cluster/logging-and-telemetry/logging.
+      // Each line is passed through as the Loki log line as-is; parse it with `| json` in Grafana.
+      otelcol.receiver.tcplog "talos" {
+        listen_address = "0.0.0.0:5140"
+        add_attributes = true
+
+        output {
+          logs = [otelcol.processor.attributes.talos.input]
+        }
+      }
+
+      otelcol.processor.attributes "talos" {
+        action {
+          key    = "job"
+          action = "insert"
+          value  = "talos"
+        }
+        action {
+          key    = "loki.attribute.labels"
+          action = "insert"
+          value  = "job"
+        }
+
+        output {
+          logs = [otelcol.exporter.loki.talos.input]
+        }
+      }
+
+      otelcol.exporter.loki "talos" {
+        forward_to = [loki.write.default.receiver]
+      }
+
+      loki.write "default" {
+        endpoint {
+          url = "http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push"
+        }
+      }
+
+serviceMonitor:
+  enabled: true

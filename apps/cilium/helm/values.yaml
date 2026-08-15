@@ -25,6 +25,22 @@ gatewayAPI:
   enableAlpn: true
 bgpControlPlane:
   enabled: true
+prometheus:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    # kube-prometheus-stack's ServiceMonitor CRD is installed by the separate
+    # prometheus-operator-crds Application (sync-wave -8, ahead of Cilium's -7), so it's always
+    # present by the time this chart renders.
+    trustCRDsExist: true
+envoy:
+  prometheus:
+    serviceMonitor:
+      enabled: true
+operator:
+  prometheus:
+    serviceMonitor:
+      enabled: true
 hubble:
   enabled: true
   relay:
@@ -41,3 +57,5 @@ hubble:
       - icmp
       - port-distribution
       - tcp
+    serviceMonitor:
+      enabled: true
