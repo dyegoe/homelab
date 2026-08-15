@@ -36,6 +36,14 @@ controlPlane:
               dhcp: true
               vip:
                 ip: 172.31.86.10 # Your native Talos VIP
+    - |-
+      cluster:
+        controllerManager:
+          extraArgs:
+            bind-address: 0.0.0.0 # Default 127.0.0.1 leaves it unreachable for Prometheus to scrape
+        scheduler:
+          extraArgs:
+            bind-address: 0.0.0.0 # Same as above
 
 allowSchedulingOnMasters: true
 
