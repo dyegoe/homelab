@@ -51,7 +51,35 @@ alloy:
 
       loki.source.kubernetes "pods" {
         targets    = discovery.relabel.pods.output
+        forward_to = [loki.process.pods.receiver]
+      }
+
+      // Control-plane components (kube-apiserver, kube-controller-manager, kube-scheduler) log via
+      // klog, e.g. "W0816 16:17:56.601420 1 logging.go:55] ...". Loki's own level-detection heuristic
+      // doesn't recognize klog's single-letter prefix, so these all land as detected_level="unknown"
+      // even though the line is explicitly a Warning/Error. Extract the klog letter and set it as the
+      // `level` structured metadata field, which Loki uses verbatim instead of guessing.
+      loki.process "pods" {
         forward_to = [loki.write.default.receiver]
+
+        stage.match {
+          selector = "{container=~\"kube-apiserver|kube-controller-manager|kube-scheduler\"}"
+
+          stage.regex {
+            expression = "^(?P<klog_level>[IWEF])\\d{4}"
+          }
+
+          stage.template {
+            source   = "klog_level"
+            template = "{{ if eq .Value \"I\" }}info{{ else if eq .Value \"W\" }}warning{{ else if eq .Value \"E\" }}error{{ else if eq .Value \"F\" }}critical{{ end }}"
+          }
+
+          stage.structured_metadata {
+            values = {
+              level = "klog_level",
+            }
+          }
+        }
       }
 
       // Talos logs: machine (kernel + service) logs shipped as newline-delimited JSON over TCP,
