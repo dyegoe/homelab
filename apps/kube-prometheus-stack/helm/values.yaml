@@ -83,6 +83,14 @@ kube-state-metrics:
     limits:
       cpu: 100m
       memory: 128Mi
+# Every physical node in this cluster is Linux - the chart also bundles a Node Exporter dashboard
+# per OS (AIX, macOS/darwin) that will never have data here. Linux stays enabled (default).
+nodeExporter:
+  operatingSystems:
+    aix:
+      enabled: false
+    darwin:
+      enabled: false
 prometheus-node-exporter:
   resources:
     requests:
