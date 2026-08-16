@@ -4,3 +4,4 @@ kind: Kustomization
 resources:
   - httproute-grafana.yaml
   - httproute-grafana-redirect.yaml
+  - onepassword-telegram-bot-token.yaml

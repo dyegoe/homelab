@@ -67,14 +67,12 @@ alertmanager:
       limits:
         cpu: 100m
         memory: 128Mi
-    # Same 1Password-operator annotation pattern as grafana.podAnnotations/cloudflared - reuses the
-    # existing "telegram-bot-token-home-lab" item (API Credential type: `credential` field is the bot
-    # token, `chat_id` is the target chat). Injects a Secret named telegram-bot-token, then `secrets:`
-    # below mounts it into the pod at /etc/alertmanager/secrets/telegram-bot-token/<key>.
-    podMetadata:
-      annotations:
-        operator.1password.io/item-path: "vaults/Kubernetes/items/telegram-bot-token-home-lab"
-        operator.1password.io/item-name: "telegram-bot-token"
+    # The telegram-bot-token Secret is created by the OnePasswordItem CR in
+    # onepassword-telegram-bot-token.yaml (not the operator.1password.io annotation pattern used for
+    # grafana/cloudflared) - confirmed live that the annotation-based auto-inject path doesn't react to
+    # Alertmanager's StatefulSet-owned pod (matches a limitation the old homelab-gitops repo's own
+    # comments already flagged for this operator). `secrets:` below mounts the resulting Secret into
+    # the pod at /etc/alertmanager/secrets/telegram-bot-token/<key>.
     secrets:
       - telegram-bot-token
   # Ported from the old homelab-gitops repo's Alertmanager config. Only route/receivers are set here -
