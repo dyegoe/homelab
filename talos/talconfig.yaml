@@ -18,6 +18,10 @@ controlPlane:
         proxy:
           disabled: true # Strict kube-proxy-less mode
       machine:
+        logging:
+          destinations:
+            - endpoint: "tcp://172.31.100.2:5140/" # Alloy's alloy-talos-logs LoadBalancer Service
+              format: "json_lines"
         kubelet:
           extraArgs:
             rotate-server-certificates: "true"
@@ -44,6 +48,11 @@ controlPlane:
         scheduler:
           extraArgs:
             bind-address: 0.0.0.0 # Same as above
+    - |-
+      apiVersion: v1alpha1
+      kind: KmsgLogConfig
+      name: talos-kernel-logs
+      url: "tcp://172.31.100.2:5140/" # Alloy's alloy-talos-logs LoadBalancer Service - kernel/dmesg logs only, `machine.logging.destinations` above covers service logs
 
 allowSchedulingOnMasters: true
 
