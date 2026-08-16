@@ -90,7 +90,7 @@ What's checked (`.pre-commit-config.yaml`):
   - 172.31.86.11 (kihnu.nodes.ee)
   - 172.31.86.12 (muhu.nodes.ee)
   - 172.31.86.13 (ruhnu.nodes.ee)
-- Cilium BGP peering with Mikrotik router (TODO: add BGP configuration)
+- Cilium BGP peering with Mikrotik router — see [Advanced Networking](#advanced-networking)
 
 ### TalOS installation
 
@@ -470,14 +470,14 @@ multi-environment promotion. This section will be filled in once bootstrapped.
 
 ### Rotating the ArgoCD repo credential
 
-The Secret `argocd/repo-homelab-gitops` (created during [Bootstrap ArgoCD](#bootstrap-from-zero)) holds the GitHub fine-grained PAT that ArgoCD uses to read this repository. It is intentionally **not** GitOps-managed: it is the chicken-and-egg credential that must exist before ArgoCD can sync anything (including the 1Password Operator that could otherwise reconcile it). The PAT is read-only and rotates roughly every 90 days, so manual rotation is the chosen trade-off.
+The Secret `argocd/repo-homelab` (created during [Bootstrap ArgoCD](#bootstrap-from-zero)) holds the GitHub fine-grained PAT that ArgoCD uses to read this repository. It is intentionally **not** GitOps-managed: it is the chicken-and-egg credential that must exist before ArgoCD can sync anything (including the 1Password Operator that could otherwise reconcile it). The PAT is read-only and rotates roughly every 90 days, so manual rotation is the chosen trade-off.
 
 **Source of truth:** 1Password item `GitHub Personal Access Token argocd`, field `token`.
 
 When ArgoCD starts failing to fetch the repo (auth errors, `ComparisonError` across many apps), rotate the PAT in 1Password, then patch the Secret in place:
 
 ```bash
-kubectl -n argocd patch secret repo-homelab-gitops \
+kubectl -n argocd patch secret repo-homelab \
   --type=merge \
   -p "{\"stringData\":{\"password\":\"$(op item get 'GitHub Personal Access Token argocd' --fields token --reveal)\"}}"
 ```
@@ -485,7 +485,7 @@ kubectl -n argocd patch secret repo-homelab-gitops \
 Verify the connection recovered:
 
 ```bash
-argocd repo get https://github.com/dyegoe/homelab-gitops.git   # STATUS should be Successful
+argocd repo get https://github.com/dyegoe/homelab.git          # STATUS should be Successful
 argocd app list | awk 'NR==1 || /Unknown|ComparisonError/'     # should be empty after a refresh
 ```
 
@@ -493,7 +493,11 @@ If apps are still showing stale `ComparisonError`, refresh them (`argocd app get
 
 ## Advanced Networking
 
-> **Note**: This section is a work in progress. It will be filled in once the Cilium BGP/LoadBalancerIPPool/HTTPRoute resources are fully configured and tested.
+Cilium's BGP control plane (`CiliumBGPClusterConfig`/`CiliumBGPPeerConfig`/`CiliumBGPAdvertisement` in
+`apps/cilium/`) peers with the Mikrotik router below to advertise `CiliumLoadBalancerIPPool` IPs directly,
+instead of relying on L2 announcements. Confirmed live and working — see the **Cilium BGP** Grafana
+dashboard ([Metrics dashboards](#metrics-dashboards)) for session state, advertised/received routes per
+node.
 
 ### Mikrotik BGP configuration
 
