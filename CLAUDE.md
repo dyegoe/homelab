@@ -62,7 +62,7 @@ README.md's `GitOps` section — that's the canonical reference. Summary for qui
   real cause of a real incident on this cluster: a wrong `k8sServiceHost` value shipped via `--set`
   and took an hour to diagnose, because nothing rendered a reviewable diff before it reached the
   cluster). A standalone values file is still worth it on its own merits: local tooling (`helm
-  template`/`lint`/`diff` work directly against it), review signal (a values change and
+template`/`lint`/`diff` work directly against it), review signal (a values change and
   `Application`-plumbing change don't get bundled in the same file/diff), and it's what keeps
   Kargo's rendering workflow (planned) clean to build on later. Extra plain manifests an addon needs
   beyond its Helm chart (e.g. Cilium's BGP/LoadBalancerIPPool/HTTPRoute config) go in a sibling

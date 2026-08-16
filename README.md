@@ -6,6 +6,7 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
 
 - [Homelab](#homelab)
   - [Table of Contents](#table-of-contents)
+  - [Pre-commit hooks](#pre-commit-hooks)
   - [Initial Cluster Setup](#initial-cluster-setup)
     - [Hardware Specifications](#hardware-specifications)
     - [Network configuration](#network-configuration)
@@ -24,7 +25,39 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
   - [1Password Operator](#1password-operator)
     - [Installation](#installation)
     - [How to use](#how-to-use)
+  - [Observability](#observability)
+    - [Architecture](#architecture-1)
+    - [Accessing Grafana](#accessing-grafana)
+    - [Viewing logs](#viewing-logs)
+    - [Metrics dashboards](#metrics-dashboards)
   - [Overall setup summary and sequence](#overall-setup-summary-and-sequence)
+
+## Pre-commit hooks
+
+This repo uses [pre-commit](https://pre-commit.com/) to catch formatting/lint/schema issues before they
+land - install once per clone, then it runs automatically on every commit:
+
+```bash
+pre-commit install
+```
+
+Check everything now (useful right after cloning, or after pulling changes):
+
+```bash
+pre-commit run --all-files
+```
+
+What's checked (`.pre-commit-config.yaml`):
+
+- General hygiene - trailing whitespace, end-of-file newlines, merge conflict markers, large files.
+- YAML - syntax (`check-yaml`) and style (`yamllint`, config in `.yamllint.yaml`).
+- Markdown - auto-formatted with `prettier` (table alignment, etc.), then linted with
+  `markdownlint-cli2` (config in `.markdownlint-cli2.yaml`).
+- Secrets - `gitleaks` scans staged changes for accidentally committed credentials.
+- Kubernetes manifests - every `kustomization.yaml` in the repo gets built (`kubectl kustomize`) and
+  validated against the Kubernetes API + CRD schemas with `kubeconform`
+  (`scripts/kustomize-validate.sh`). Needs network access (schema/CRD lookups); results are cached in
+  `.kubeconform-cache/` (gitignored) after the first run.
 
 ## Initial Cluster Setup
 
@@ -400,19 +433,33 @@ values-reference source needs that.
 If software is already running from a manual `helm install`/`kubectl apply` (as Cilium was, before
 this pattern existed): **do not** set `syncPolicy.automated` on its first commit. Push it with
 automation off, sync once manually (`argocd app sync <name>`, or via the UI), and confirm the diff
-is empty or exactly what's expected — *before* enabling `automated: {prune: true, selfHeal: true}`
+is empty or exactly what's expected — _before_ enabling `automated: {prune: true, selfHeal: true}`
 in a follow-up commit. This is the guardrail that would have caught the incident that motivated
 this whole approach: a wrong Cilium value shipped via a raw `--set` flag and took an hour to
 diagnose, because nothing rendered a reviewable diff before it reached the cluster.
 
 ### Current Applications
 
-| Application    | Sync wave | Automated | Notes                                                                                                                                                                                                                                                                    |
-| -------------- | --------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `argocd`       | `-10`     | yes       | Self-managed ArgoCD install                                                                                                                                                                                                                                              |
-| `apps`         | `-9`      | yes       | App-of-Apps parent                                                                                                                                                                                                                                                       |
-| `gateway-crds` | `-8`      | yes       | Gateway API CRDs, sourced directly from `kubernetes-sigs/gateway-api`'s `config/crd/experimental` path                                                                                                                                                                   |
-| `cilium`       | `-7`      | pending   | Adopted from the manual install above — automation enabled once the first-sync diff (including the still-pending BGP/LoadBalancerIPPool/HTTPRoute addition) is confirmed clean (see [Adopting existing (non-GitOps) resources](#adopting-existing-non-gitops-resources)) |
+| Application                     | Sync wave | Automated | Notes                                                                                                                                                                            |
+| ------------------------------- | --------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `argocd`                        | `-10`     | yes       | Self-managed ArgoCD install                                                                                                                                                      |
+| `apps`                          | `-9`      | yes       | App-of-Apps parent                                                                                                                                                               |
+| `gateway-crds`                  | `-8`      | yes       | Gateway API CRDs, sourced directly from `kubernetes-sigs/gateway-api`'s `config/crd/experimental` path                                                                           |
+| `snapshot-crds`                 | `-8`      | yes       | CSI volume snapshot CRDs                                                                                                                                                         |
+| `prometheus-operator-crds`      | `-8`      | yes       | Prometheus Operator CRDs only, split from `kube-prometheus-stack` so every other addon's `ServiceMonitor` renders regardless of sync order (see [Observability](#observability)) |
+| `cilium`                        | `-7`      | yes       | Adopted from the manual install described above (see [Adopting existing (non-GitOps) resources](#adopting-existing-non-gitops-resources))                                        |
+| `kubelet-serving-cert-approver` | `-6`      | yes       |                                                                                                                                                                                  |
+| `metrics-server`                | `-6`      | yes       |                                                                                                                                                                                  |
+| `sealed-secrets`                | `-6`      | yes       |                                                                                                                                                                                  |
+| `onepassword`                   | `-5`      | yes       |                                                                                                                                                                                  |
+| `cert-manager`                  | `-4`      | yes       |                                                                                                                                                                                  |
+| `cloudflared`                   | `-4`      | yes       |                                                                                                                                                                                  |
+| `external-dns`                  | `-4`      | yes       |                                                                                                                                                                                  |
+| `gateway`                       | `-3`      | yes       |                                                                                                                                                                                  |
+| `longhorn`                      | `-2`      | yes       |                                                                                                                                                                                  |
+| `kube-prometheus-stack`         | `-1`      | yes       | After `longhorn` - Prometheus/Grafana persistence needs a working storage class                                                                                                  |
+| `loki`                          | `-1`      | yes       | Same storage dependency as above                                                                                                                                                 |
+| `alloy`                         | `0`       | yes       | Log shipping - pods via the Kubernetes API, Talos's own logs via a LoadBalancer Service                                                                                          |
 
 ### Kargo (planned)
 
@@ -515,6 +562,84 @@ metadata:
 
 For more information, refer to the [official documentation](https://developer.1password.com/docs/k8s/operator/).
 
+## Observability
+
+Metrics and logs for the cluster, replacing an earlier split Prometheus/Grafana/Loki/Alloy-operator setup
+from a previous iteration of this homelab.
+
+### Architecture
+
+Four addons:
+
+- `prometheus-operator-crds` (sync-wave `-8`) — just the Prometheus Operator CRDs (`ServiceMonitor`,
+  `PodMonitor`, `PrometheusRule`, ...), split out from the main chart and sync'd early so every other
+  addon's `ServiceMonitor` can render regardless of how early it syncs. `kube-prometheus-stack` itself
+  can't sync that early — its Prometheus/Grafana persistence needs Longhorn, which lands much later — so
+  without this split there'd be a chicken-and-egg deadlock between Cilium's `ServiceMonitor` (wave `-7`)
+  and the CRD that defines it.
+- `kube-prometheus-stack` (sync-wave `-1`, after `longhorn`) — Prometheus, Grafana, Alertmanager,
+  kube-state-metrics, node-exporter.
+- `loki` (sync-wave `-1`) — log storage, SingleBinary mode on a Longhorn-backed PVC.
+- `alloy` (sync-wave `0`, DaemonSet) — log shipping only, not metrics: tails every pod's logs via
+  `loki.source.kubernetes`, and receives Talos's own kernel/service logs over TCP
+  (`otelcol.receiver.tcplog`) via a dedicated LoadBalancer Service.
+
+Resource requests/limits, Grafana's `Recreate` deployment strategy, and Loki's PVC auto-delete guard in
+`apps/kube-prometheus-stack/helm/values.yaml` and `apps/loki/helm/values.yaml` are carried over from
+concrete incidents on this same hardware in the previous iteration of this stack (unbounded resources
+exhausting the 3-node cluster, Grafana stuck on redeploy behind a single RWO PVC, Loki losing history on
+StatefulSet recreation) — see the comments in those files for specifics.
+
+### Accessing Grafana
+
+`https://grafana.nodes.ee`. Credentials come from the `Home Lab Grafana` 1Password item (`username`/
+`confirmNew` fields), wired in via `grafana.podAnnotations` in
+`apps/kube-prometheus-stack/helm/values.yaml` (same 1Password-operator annotation pattern as
+`cloudflared`/`external-dns` — see [1Password Operator](#1password-operator)).
+
+### Viewing logs
+
+Logs live in Loki, browsed from Grafana's **Explore** tab (compass icon) with the **Loki** datasource
+selected. There's no bundled log dashboard — Explore is the primary way to browse logs today.
+
+Pod logs (every namespace, tailed by Alloy via the Kubernetes API — no `hostPath` mount needed):
+
+```logql
+{namespace="cert-manager"}
+{namespace="monitoring", pod="grafana-864965887b-pkrdl", container="grafana"}
+{namespace="cert-manager"} |= "error"
+```
+
+Available labels: `namespace`, `pod`, `container`, `node`, `job`, `service_name`.
+
+Talos's own logs (kernel + service, from all 3 nodes, shipped via `machine.logging.destinations` +
+`KmsgLogConfig` in `talos/talconfig.yaml`):
+
+```logql
+{job="talos"}
+{job="talos"} | json | talos_service="machined"
+{job="talos"} | json | facility="kern"
+```
+
+The log line itself is the raw `json_lines` text Talos sends — it isn't parsed at ingest (standard Loki
+practice: index less, parse at query time), so use LogQL's `| json` pipeline stage to pull out fields.
+Service logs carry `talos-service`/`talos-level`/`msg`/`talos-time`; kernel logs carry
+`facility`/`priority`/`msg`/`clock` instead — no `talos-service` field, since they don't come from a
+Talos service.
+
+### Metrics dashboards
+
+Grafana comes with kube-prometheus-stack's bundled dashboards (Kubernetes cluster/node/pod views,
+CoreDNS, etc.) under **Dashboards**. Two known gaps, not bugs to chase if rediscovered:
+
+- The Alertmanager Grafana datasource plugin ships with `autoEnabled: false`, so it 500s with
+  `plugin.unavailable` when viewed through Grafana. Alertmanager's own UI works fine standalone.
+- The bundled "kubernetes-mixin" dashboards (Compute Resources: Namespace/Pod/Workload) key off a
+  `cluster` label that a standalone, non-federated Prometheus like this one never sets on locally-queried
+  series (`externalLabels` only affects federation/remote-write/Alertmanager metadata, not local
+  queries) — accepted as a known gap rather than adding `metricRelabelings` to every `ServiceMonitor`
+  across every addon.
+
 ## Overall setup summary and sequence
 
 1. Boot TalOS on each node from the USB stick and apply the TalOS config files.
@@ -530,3 +655,10 @@ For more information, refer to the [official documentation](https://developer.1p
 11. Apply Gateway API via GitOps
 12. Apply Hubble Gateway API resources via GitOps
 13. Apply ArgoCD Gateway API resources and patches via GitOps
+14. Apply Longhorn via GitOps
+15. Apply Prometheus Operator CRDs, kube-prometheus-stack, Loki, and Alloy via GitOps (see
+    [Observability](#observability))
+16. Patch `talos/talconfig.yaml` for `kube-scheduler`/`kube-controller-manager`
+    `bind-address: 0.0.0.0` (needed for Prometheus to scrape them) and
+    `machine.logging.destinations`/`KmsgLogConfig` (ships Talos's own logs to Alloy), then
+    `talhelper genconfig` and `talosctl apply-config`

@@ -91,7 +91,7 @@ curl -sL https://talos.dev/install-omnictl | sh
 5. Sync declared state to Omni: `omnictl cluster template sync -f <template.yaml>`
 6. Fetch kubeconfig: `omnictl kubeconfig -c <cluster-name>`
 7. Download talosconfig: `omnictl talosconfig --cluster <cluster-name>`
-8. Merge `talosconfig` and `kubeconfig` configuration: 
+8. Merge `talosconfig` and `kubeconfig` configuration:
   ```bash
      # Merge Talos configuration
       talosctl config merge $HOME/Downloads/talosconfig.yaml

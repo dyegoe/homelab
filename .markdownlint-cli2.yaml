@@ -1,0 +1,10 @@
+---
+config:
+  default: true
+  # Prettier reflows prose and code blocks legitimately exceed any fixed width.
+  MD013: false
+  # README has two "### Architecture" headings under different "##" parents (GitOps, Observability) -
+  # legitimate, not a duplication bug.
+  MD024:
+    siblings_only: true
+  MD033: false
