@@ -67,6 +67,43 @@ alertmanager:
       limits:
         cpu: 100m
         memory: 128Mi
+    # Same 1Password-operator annotation pattern as grafana.podAnnotations/cloudflared - reuses the
+    # existing "telegram-bot-token-home-lab" item (API Credential type: `credential` field is the bot
+    # token, `chat_id` is the target chat). Injects a Secret named telegram-bot-token, then `secrets:`
+    # below mounts it into the pod at /etc/alertmanager/secrets/telegram-bot-token/<key>.
+    podMetadata:
+      annotations:
+        operator.1password.io/item-path: "vaults/Kubernetes/items/telegram-bot-token-home-lab"
+        operator.1password.io/item-name: "telegram-bot-token"
+    secrets:
+      - telegram-bot-token
+  # Ported from the old homelab-gitops repo's Alertmanager config. Only route/receivers are set here -
+  # global/inhibit_rules/templates are left alone so the chart's own sensible defaults (severity-based
+  # inhibition, etc.) still apply via Helm's map merge. The chart's default route already carves out
+  # Watchdog (kube-prometheus-stack's built-in always-firing heartbeat, confirmed live) to the 'null'
+  # receiver - kept here so it doesn't spam Telegram, and doubles as the "did this pipeline actually
+  # wire up" signal (resolves paths through Watchdog->null instead, still exercises the routing tree).
+  config:
+    route:
+      receiver: telegram
+      group_by:
+        - alertname
+        - namespace
+        - job
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+        - receiver: "null"
+          matchers:
+            - alertname = "Watchdog"
+    receivers:
+      - name: "null"
+      - name: telegram
+        telegram_configs:
+          - bot_token_file: /etc/alertmanager/secrets/telegram-bot-token/credential
+            chat_id_file: /etc/alertmanager/secrets/telegram-bot-token/chat_id
+            send_resolved: true
 prometheusOperator:
   resources:
     requests:

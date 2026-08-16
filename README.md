@@ -29,6 +29,7 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
     - [Architecture](#architecture-1)
     - [Accessing Grafana](#accessing-grafana)
     - [Viewing logs](#viewing-logs)
+    - [Alerting (Telegram)](#alerting-telegram)
     - [Metrics dashboards](#metrics-dashboards)
     - [Known log noise (recheck on next Kubernetes upgrade)](#known-log-noise-recheck-on-next-kubernetes-upgrade)
   - [Overall setup summary and sequence](#overall-setup-summary-and-sequence)
@@ -631,6 +632,26 @@ practice: index less, parse at query time), so use LogQL's `| json` pipeline sta
 Service logs carry `talos-service`/`talos-level`/`msg`/`talos-time`; kernel logs carry
 `facility`/`priority`/`msg`/`clock` instead — no `talos-service` field, since they don't come from a
 Talos service.
+
+### Alerting (Telegram)
+
+Alertmanager routes to a `telegram` receiver by default (`apps/kube-prometheus-stack/helm/values.yaml`'s
+`alertmanager.config`), ported from the old homelab-gitops repo's setup. The bot token/chat ID come from
+the existing `telegram-bot-token-home-lab` 1Password item (API Credential type: `credential` field is the
+bot token, `chat_id` is the target chat) via the same `operator.1password.io/item-path` annotation pattern
+used for Grafana/cloudflared — see [1Password Operator](#1password-operator) — injected as a Secret
+mounted into the Alertmanager pod at `/etc/alertmanager/secrets/telegram-bot-token/`.
+kube-prometheus-stack's own default `inhibit_rules`/`templates` are left untouched (only `route`/
+`receivers` are overridden), so Helm's map merge keeps the chart's severity-based inhibition.
+
+`Watchdog` — kube-prometheus-stack's bundled always-firing heartbeat alert (`vector(1)`, confirmed live
+via `ALERTS{alertname="Watchdog"}`) — is explicitly routed to the built-in `null` receiver so it doesn't
+spam Telegram every `repeat_interval`. Everything else routes to `telegram`, grouped by
+`alertname`/`namespace`/`job`.
+
+To verify the pipeline end-to-end without waiting for a real alert, temporarily route `Watchdog` to
+`telegram` instead of `null` in the config above and sync — a message should arrive within a few minutes
+(`group_wait: 30s`) — then revert.
 
 ### Metrics dashboards
 
