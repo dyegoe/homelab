@@ -30,6 +30,7 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
     - [Accessing Grafana](#accessing-grafana)
     - [Viewing logs](#viewing-logs)
     - [Metrics dashboards](#metrics-dashboards)
+    - [Known log noise (recheck on next Kubernetes upgrade)](#known-log-noise-recheck-on-next-kubernetes-upgrade)
   - [Overall setup summary and sequence](#overall-setup-summary-and-sequence)
 
 ## Pre-commit hooks
@@ -639,6 +640,28 @@ CoreDNS, etc.) under **Dashboards**. Two known gaps, not bugs to chase if redisc
   series (`externalLabels` only affects federation/remote-write/Alertmanager metadata, not local
   queries) — accepted as a known gap rather than adding `metricRelabelings` to every `ServiceMonitor`
   across every addon.
+
+### Known log noise (recheck on next Kubernetes upgrade)
+
+`{namespace="kube-system"} |= "2379"` shows recurring `kube-apiserver` warnings on all 3 nodes, every
+~10-30s, e.g.:
+
+```text
+W0816 19:53:07.904157       1 logging.go:55] [core] [Channel #32593 SubChannel #32594] grpc:
+addrConn.createTransport failed to connect to {Addr: "127.0.0.1:2379", ServerName: "127.0.0.1:2379", }.
+Err: connection error: desc = "transport: authentication handshake failed: context canceled"
+```
+
+Root cause, confirmed upstream in [kubernetes/kubernetes#134080](https://github.com/kubernetes/kubernetes/issues/134080):
+`kube-apiserver` was recreating its etcd client on every metrics scrape instead of reusing a cached
+connection — harmless log churn, not an actual etcd/apiserver problem (cluster health is unaffected).
+Fixed by [kubernetes/kubernetes#138075](https://github.com/kubernetes/kubernetes/pull/138075), merged
+2026-04-22, targeting **Kubernetes v1.37**; a backport to 1.34-1.36 was discussed in the PR but not
+confirmed shipped as of this writing. This cluster runs `v1.36.2` (`kubernetesVersion` in
+`talos/talconfig.yaml`), so it isn't fixed yet.
+
+**Recheck when**: `kubernetesVersion` in `talos/talconfig.yaml` is bumped past `1.36.2` — see if this
+noise disappears; if not, check whether the 1.34-1.36 backport of #138075 ever landed.
 
 ## Overall setup summary and sequence
 

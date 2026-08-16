@@ -98,6 +98,13 @@ runs a command (checking pod/node status, logs, etc.) is always fine and encoura
 
 ## Working with this repo
 
+- README.md is the source of truth for known issues and deferred items, not just setup steps —
+  e.g. the `Observability` section's "Known log noise" entry tracks a `kube-apiserver`/etcd log-noise
+  issue with an explicit recheck trigger (bump `kubernetesVersion` past a given version). Skim the
+  relevant README section before starting related work, and proactively suggest rechecking a tracked
+  item when its trigger condition is met (e.g. a `kubernetesVersion` bump in `talconfig.yaml`) rather
+  than waiting to be asked. When closing out a similar investigation in the future, add a same-shaped
+  entry (root cause, upstream link, explicit recheck trigger) instead of only reporting it in chat.
 - Node hardware/network details (hostnames, static IPs, disk device names) are documented in
   README.md — keep `talconfig.yaml` and README.md in sync when nodes change.
 - `installDisk` per node is `/dev/nvme0n1`; verify this matches actual hardware before applying to
