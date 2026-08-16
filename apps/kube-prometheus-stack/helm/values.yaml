@@ -135,8 +135,10 @@ prometheus-node-exporter:
     # only ~5m average usage. node-exporter's /proc+/sys scan on each scrape is a short CPU burst, not
     # sustained load, so the CFS quota gets exhausted in a fraction of a period even though the
     # time-averaged rate looks tiny. Bumped for burst headroom, not because it's using more CPU.
+    # First bump (50m -> 200m, upstream's own suggested value) helped but wasn't enough - 21-49%
+    # throttled on stable 28min-old pods, still above the 25% alert threshold on 2 of 3 nodes.
     limits:
-      cpu: 200m
+      cpu: 300m
       memory: 64Mi
 grafana:
   fullnameOverride: grafana
@@ -163,8 +165,9 @@ grafana:
       # cpu limit was 100m - CPUThrottlingHigh fired at 70-75% throttled periods. Same burst-vs-limit
       # mismatch as node-exporter below, made worse by this session's dashboard-porting work: the
       # sidecar now diffs ~10 more ConfigMaps across every namespace (searchNamespace: ALL).
+      # First bump (100m -> 300m) helped (75% -> 39%) but wasn't enough on its own.
       limits:
-        cpu: 300m
+        cpu: 500m
         memory: 128Mi
   # Chart default is RollingUpdate, which starts the new pod before killing the old one - that
   # deadlocks against a single ReadWriteOnce Longhorn PVC (can't attach to two pods at once) and
