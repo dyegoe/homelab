@@ -72,27 +72,31 @@ alloy:
             expression = "^(?P<klog_level>[IWEF])\\d{4}"
           }
 
+          // stage.replace only substitutes matched capture groups, not the whole match - an
+          // anchored regex with no group (e.g. "^W$") silently replaces nothing. Verified locally
+          // against the real alloy binary (piped through otelcol.exporter.debug) before wrapping
+          // each expression in a group fixed it.
           stage.replace {
             source     = "klog_level"
-            expression = "^I$"
+            expression = "(^I$)"
             replace    = "info"
           }
 
           stage.replace {
             source     = "klog_level"
-            expression = "^W$"
+            expression = "(^W$)"
             replace    = "warning"
           }
 
           stage.replace {
             source     = "klog_level"
-            expression = "^E$"
+            expression = "(^E$)"
             replace    = "error"
           }
 
           stage.replace {
             source     = "klog_level"
-            expression = "^F$"
+            expression = "(^F$)"
             replace    = "critical"
           }
 
