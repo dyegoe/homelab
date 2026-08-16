@@ -4,4 +4,4 @@ kind: Kustomization
 resources:
   - deployment-cloudflared.yaml
   - service-metrics.yaml
-  # - servicemonitor.yaml
+  - servicemonitor.yaml

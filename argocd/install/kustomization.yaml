@@ -6,6 +6,9 @@ resources:
   - grpcroute-argocd-grpc.yaml
   - httproute-argocd-redirect.yaml
   - httproute-argocd.yaml
+  - servicemonitor-argocd-application-controller.yaml
+  - servicemonitor-argocd-server.yaml
+  - servicemonitor-argocd-notifications-controller.yaml
 patches:
   - path: patch-deployments.yaml
     target:

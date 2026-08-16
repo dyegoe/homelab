@@ -1,0 +1,15 @@
+---
+# API server: gRPC/HTTP request rates, errors, latency.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: argocd-server
+  namespace: argocd
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-server-metrics
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
