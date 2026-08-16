@@ -22,6 +22,9 @@ spec:
     - repoURL: https://github.com/dyegoe/homelab.git
       targetRevision: main
       ref: values
+    - repoURL: https://github.com/dyegoe/homelab.git
+      targetRevision: main
+      path: apps/external-dns
   destination:
     server: https://kubernetes.default.svc
     namespace: external-dns

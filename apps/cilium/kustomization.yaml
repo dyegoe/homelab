@@ -8,3 +8,20 @@ resources:
   - ciliumloadbalancerippool-cilium-lb-pool.yaml
   - httproute-hubble-redirect.yaml
   - httproute-hubble.yaml
+
+# Grafana's sidecar (searchNamespace: ALL) auto-discovers any ConfigMap labeled grafana_dashboard:
+# "1" in any namespace, so these can live alongside the addon they document instead of centralized
+# under kube-prometheus-stack. Ported from the old homelab-gitops repo's dashboards; the BGP
+# dashboard was dropped - its only metric (cilium_bgp_last_keepalive_time_seconds) was renamed
+# upstream to cilium_bgp_control_plane_* and no longer exists in this chart version.
+configMapGenerator:
+  - name: grafana-dashboard-cilium
+    files:
+      - dashboards/cni-cilium-agent.json
+      - dashboards/cni-cilium-operator.json
+      - dashboards/cni-hubble.json
+
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    grafana_dashboard: "1"
