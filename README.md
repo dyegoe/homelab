@@ -25,6 +25,7 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
   - [1Password Operator](#1password-operator)
     - [Installation](#installation)
     - [How to use](#how-to-use)
+    - [Migrating a bootstrap secret to 1Password](#migrating-a-bootstrap-secret-to-1password)
   - [Observability](#observability)
     - [Architecture](#architecture-1)
     - [Accessing Grafana](#accessing-grafana)
@@ -326,6 +327,20 @@ it can manage itself), then handing over to GitOps.
 
 **Day 0 — imperative, one-time:**
 
+Before any of this, create the 1Password item the repo credential is sourced from — vault `Kubernetes`:
+
+- Type: **Login**
+- Name: `github-personal-access-token-argocd`
+- Username: `dyegoe`
+- Password: a GitHub fine-grained PAT, scoped read-only to this repo
+- Rename the default `website` field to `url`, value `https://github.com/dyegoe/homelab.git`
+- Add a new `text` field named `type`, value `git`
+
+The Login item's built-in `username`/`password` fields plus the two custom fields (`url`, `type`) map
+1:1 onto the four keys ArgoCD's repo Secret needs below — and again later, unchanged, once this Secret
+is handed off to the 1Password Operator (see
+[Migrating a bootstrap secret to 1Password](#migrating-a-bootstrap-secret-to-1password)).
+
 ```bash
 # Namespace for ArgoCD
 kubectl create namespace argocd
@@ -335,7 +350,7 @@ kubectl -n argocd create secret generic repo-homelab \
   --from-literal=type=git \
   --from-literal=url=https://github.com/dyegoe/homelab.git \
   --from-literal=username=dyegoe \
-  --from-literal=password=$(op item get "GitHub Personal Access Token argocd" --fields token --reveal)
+  --from-literal=password=$(op item get "github-personal-access-token-argocd" --fields password --reveal)
 kubectl -n argocd label secret repo-homelab argocd.argoproj.io/secret-type=repository
 
 # Install ArgoCD (pin the version — check https://github.com/argoproj/argo-cd/releases for latest)
@@ -471,34 +486,36 @@ multi-environment promotion. This section will be filled in once bootstrapped.
 
 ### Rotating the ArgoCD repo credential
 
-The Secret `argocd/repo-homelab` (created during [Bootstrap ArgoCD](#bootstrap-from-zero)) holds the GitHub fine-grained PAT that ArgoCD uses to read this repository. It is intentionally **not** GitOps-managed: it is the chicken-and-egg credential that must exist before ArgoCD can sync anything (including the 1Password Operator that could otherwise reconcile it). The PAT is read-only and rotates roughly every 90 days, so manual rotation is the chosen trade-off.
+`argocd/repo-homelab` holds the GitHub fine-grained PAT ArgoCD uses to read this repository. It started
+as a plain imperative Secret at [Bootstrap ArgoCD](#bootstrap-from-zero) — the chicken-and-egg credential
+that has to exist before ArgoCD can sync anything, including the 1Password Operator. Once the Operator
+was up, it took over managing this Secret via a `OnePasswordItem` CR (see
+[Migrating a bootstrap secret to 1Password](#migrating-a-bootstrap-secret-to-1password) for how that
+migration was done) — rotation is no longer a manual `kubectl patch`.
 
-**Source of truth:** 1Password item `GitHub Personal Access Token argocd`, field `token`.
+**Source of truth:** 1Password item `github-personal-access-token-argocd` (vault `Kubernetes`), field
+`password`. Rotate roughly every 30-90 days as best practice.
 
-When ArgoCD starts failing to fetch the repo (auth errors, `ComparisonError` across many apps), rotate the PAT in 1Password, then patch the Secret in place:
+**To rotate:** update the `password` field on that 1Password item with the new PAT. The 1Password
+Operator reconciles the `repo-homelab` Secret from the item on its own polling interval (see the
+[operator docs](https://developer.1password.com/docs/k8s/operator/)) — no `kubectl` required. Verify
+once it's picked up:
+
+```bash
+argocd repo get --refresh hard https://github.com/dyegoe/homelab.git   # STATUS should be Successful
+argocd app list | awk 'NR==1 || /Unknown|ComparisonError/'             # should be empty after a refresh
+```
+
+If apps are still showing stale `ComparisonError`, refresh them (`argocd app get <name> --refresh`) — the
+auto-sync loop also picks up the new credential within a few minutes.
+
+**Manual fallback**, if the Operator itself is down or hasn't picked up the change:
 
 ```bash
 kubectl -n argocd patch secret repo-homelab \
   --type=merge \
-  -p "{\"stringData\":{\"password\":\"$(op item get 'GitHub Personal Access Token argocd' --fields token --reveal)\"}}"
+  -p "{\"stringData\":{\"password\":\"$(op item get 'github-personal-access-token-argocd' --fields password --reveal)\"}}"
 ```
-
-Verify the connection recovered:
-
-```bash
-argocd repo get https://github.com/dyegoe/homelab.git          # STATUS should be Successful
-argocd app list | awk 'NR==1 || /Unknown|ComparisonError/'     # should be empty after a refresh
-```
-
-If apps are still showing stale `ComparisonError`, refresh them (`argocd app get <name> --refresh`) — the auto-sync loop also picks up the new credential within a few minutes.
-
-**Future work:** once the [1Password Operator](#1password-operator) is stable, replace this manually-patched
-Secret with a `OnePasswordItem` CR so the PAT can rotate on a shorter cadence (e.g. every 30-90 days)
-without a manual `kubectl patch`. This doesn't remove the bootstrap chicken-and-egg problem described
-above — `repo-homelab` must still exist manually before ArgoCD can sync anything, including the
-1Password Operator itself — so the operator-managed version would only take over _after_ first bootstrap
-(e.g. the Operator reconciles the Secret in place from then on, rather than `op`/`kubectl patch` doing it
-by hand each rotation).
 
 ## Advanced Networking
 
@@ -575,6 +592,45 @@ metadata:
 ```
 
 For more information, refer to the [official documentation](https://developer.1password.com/docs/k8s/operator/).
+
+### Migrating a bootstrap secret to 1Password
+
+Worked example: the ArgoCD repo credential (`argocd/repo-homelab`, see
+[Bootstrap ArgoCD](#bootstrap-from-zero), including the 1Password item it's sourced from) started as a
+plain imperative Secret, since it has to exist before ArgoCD — and therefore before the 1Password
+Operator — can sync anything. Once the Operator is up, it can take over managing that Secret:
+
+1. Add the `OnePasswordItem` manifest (`argocd/install/onepassword-github-dyegoe-homelab.yaml`), pointing
+   at the same 1Password item created during bootstrap:
+
+   ```yaml
+   apiVersion: onepassword.com/v1
+   kind: OnePasswordItem
+   metadata:
+     name: repo-homelab-token
+     labels:
+       argocd.argoproj.io/secret-type: repository
+   spec:
+     itemPath: "vaults/Kubernetes/items/github-personal-access-token-argocd"
+   ```
+
+2. Wire it into `argocd/install/kustomization.yaml`'s `resources`.
+
+3. Commit and push. Once ArgoCD syncs, the Operator creates `repo-homelab` itself — delete the original
+   imperative Secret:
+
+   ```bash
+   kubectl -n argocd delete secret repo-homelab
+   ```
+
+4. Verify:
+
+   ```bash
+   argocd repo get --refresh hard https://github.com/dyegoe/homelab.git
+   ```
+
+From this point on, rotating the PAT is just updating the `password` field on the 1Password item — see
+[Rotating the ArgoCD repo credential](#rotating-the-argocd-repo-credential).
 
 ## Observability
 
