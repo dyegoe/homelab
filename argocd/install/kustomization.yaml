@@ -9,6 +9,7 @@ resources:
   - servicemonitor-argocd-application-controller.yaml
   - servicemonitor-argocd-server.yaml
   - servicemonitor-argocd-notifications-controller.yaml
+  - onepassword-repo-homelab-token.yaml
 patches:
   - path: patch-deployments.yaml
     target:

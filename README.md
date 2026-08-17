@@ -492,6 +492,14 @@ argocd app list | awk 'NR==1 || /Unknown|ComparisonError/'     # should be empty
 
 If apps are still showing stale `ComparisonError`, refresh them (`argocd app get <name> --refresh`) — the auto-sync loop also picks up the new credential within a few minutes.
 
+**Future work:** once the [1Password Operator](#1password-operator) is stable, replace this manually-patched
+Secret with a `OnePasswordItem` CR so the PAT can rotate on a shorter cadence (e.g. every 30-90 days)
+without a manual `kubectl patch`. This doesn't remove the bootstrap chicken-and-egg problem described
+above — `repo-homelab` must still exist manually before ArgoCD can sync anything, including the
+1Password Operator itself — so the operator-managed version would only take over _after_ first bootstrap
+(e.g. the Operator reconciles the Secret in place from then on, rather than `op`/`kubectl patch` doing it
+by hand each rotation).
+
 ## Advanced Networking
 
 Cilium's BGP control plane (`CiliumBGPClusterConfig`/`CiliumBGPPeerConfig`/`CiliumBGPAdvertisement` in
