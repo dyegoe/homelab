@@ -496,6 +496,9 @@ in-repo workflow needed) and configured via `renovate.json` at the repo root. It
 `extends: ["config:recommended"]` — no automerge, so every bump still lands as a normal PR to
 review and merge by hand, same as the manual bumps this replaces.
 
+**Dashboard:** [developer.mend.io/github/dyegoe/homelab](https://developer.mend.io/github/dyegoe/homelab)
+— Mend's view of open/pending updates, independent of digging through PRs or branches in GitHub.
+
 ### Kargo (planned)
 
 Not yet implemented. Planned scope: standalone applications hosted on this cluster — starting with
