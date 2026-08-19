@@ -24,6 +24,11 @@ kubeProxy:
 # battle-tested ones.
 prometheus:
   prometheusSpec:
+    # Alertmanager's Telegram notifications build the "Source" link from each alert's
+    # GeneratorURL, which Prometheus stamps using this value (not Grafana's or Alertmanager's
+    # own URL). Must match the public hostname routed to Prometheus below (httproute-prometheus.yaml)
+    # for the link to actually resolve when tapped from Telegram.
+    externalUrl: https://prometheus.nodes.ee
     retention: 15d
     # The bundled "kubernetes-mixin" dashboards (Compute Resources / Namespace, Pod, Workload, ...)
     # all key off a hidden $cluster template variable sourced from this label. Without it, every
