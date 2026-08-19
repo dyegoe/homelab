@@ -145,8 +145,12 @@ prometheus-node-exporter:
     # time-averaged rate looks tiny. Bumped for burst headroom, not because it's using more CPU.
     # First bump (50m -> 200m, upstream's own suggested value) helped but wasn't enough - 21-49%
     # throttled on stable 28min-old pods, still above the 25% alert threshold on 2 of 3 nodes.
+    # Second bump (200m -> 300m) still wasn't enough - 26-37% throttled, still above threshold on
+    # all 3 nodes (confirmed live via Prometheus: avg usage only ~3-4.5m/node, so this is entirely
+    # burst-vs-quota-period behavior, not real load). Since actual usage is negligible, a much
+    # higher limit costs nothing at idle - jumped straight to 1000m instead of another small step.
     limits:
-      cpu: 300m
+      cpu: 1000m
       memory: 64Mi
 grafana:
   fullnameOverride: grafana
