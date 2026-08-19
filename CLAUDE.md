@@ -10,8 +10,8 @@ is live — ArgoCD manages its own installation plus an addon App-of-Apps (see "
 below and README.md's `GitOps` section for the full runbook). [Kargo](https://kargo.io/) is planned
 but not yet implemented, scoped to standalone applications this cluster will host (e.g. a personal
 website with `dev`/`prd` namespaces) where it does real multi-environment promotion — not the
-cluster addons, which have no dev/prd split and bump versions via a plain git PR (manually, or later
-via Renovate).
+cluster addons, which have no dev/prd split and get automated version-bump PRs from
+[Renovate](https://docs.renovatebot.com/) (see `renovate.json`).
 
 ## Architecture
 
@@ -66,9 +66,9 @@ README.md's `GitOps` section — that's the canonical reference. Summary for qui
   and took an hour to diagnose, because nothing rendered a reviewable diff before it reached the
   cluster). A standalone values file is still worth it on its own merits: local tooling (`helm
 template`/`lint`/`diff` work directly against it) and review signal (a values change and
-  `Application`-plumbing change don't get bundled in the same file/diff) — also what would make an
-  automated version-bump tool (e.g. Renovate) produce a clean, reviewable diff if one is added
-  later. Extra plain manifests an addon needs
+  `Application`-plumbing change don't get bundled in the same file/diff) — also what makes
+  Renovate's automated version-bump PRs (see `renovate.json`) produce a clean, reviewable diff.
+  Extra plain manifests an addon needs
   beyond its Helm chart (e.g. Cilium's BGP/LoadBalancerIPPool/HTTPRoute config) go in a sibling
   `apps/<name>/kustomization.yaml` (app-level, not under `helm/`), added as a third, non-`ref`
   source on the same `Application` — see `gateway-crds.yaml` for the same idea applied to a
@@ -82,8 +82,8 @@ template`/`lint`/`diff` work directly against it) and review signal (a values ch
   promotion chain with verification gates, which is what Kargo is actually built for. **Not** used
   for the cluster addons in `argocd/apps/` — there's no dev/prd split for infra, and a git PR
   already gives the same rendered-diff review Kargo's `hydrateTo` would add. Addon version bumps
-  stay a manual git PR, or later via Renovate if that becomes worth adding — don't wire addons into
-  Kargo Warehouses/Stages.
+  come via Renovate-opened PRs (see `renovate.json`) — don't wire addons into Kargo
+  Warehouses/Stages.
 
 ## Tooling
 

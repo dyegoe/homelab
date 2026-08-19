@@ -18,6 +18,7 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
     - [Adding a new Application (the pattern)](#adding-a-new-application-the-pattern)
     - [Adopting existing (non-GitOps) resources](#adopting-existing-non-gitops-resources)
     - [Current Applications](#current-applications)
+    - [Renovate](#renovate)
     - [Kargo (planned)](#kargo-planned)
     - [Rotating the ArgoCD repo credential](#rotating-the-argocd-repo-credential)
   - [Advanced Networking](#advanced-networking)
@@ -282,8 +283,8 @@ Principles:
   its keep on tooling (`helm template`/`helm lint`/`helm diff` work directly against it, no
   extraction needed) and review signal (a values change and `Application`-plumbing change — sync
   policy, `ignoreDifferences`, sync-wave — don't get bundled into the same file/diff) — the same
-  structure would also make an automated version-bump tool (e.g. Renovate) produce a clean,
-  reviewable diff if one is added later.
+  structure is also what makes [Renovate](https://docs.renovatebot.com/)'s automated version-bump
+  PRs (see `renovate.json`, and [Renovate](#renovate) below) produce a clean, reviewable diff.
 - Everything — including ArgoCD's own install — lives in this one repo. No separate
   `homelab-gitops` repo.
 
@@ -481,6 +482,20 @@ diagnose, because nothing rendered a reviewable diff before it reached the clust
 | `loki`                          | `-1`      | yes       | Same storage dependency as above                                                                                                                                                 |
 | `alloy`                         | `0`       | yes       | Log shipping - pods via the Kubernetes API, Talos's own logs via a LoadBalancer Service                                                                                          |
 
+### Renovate
+
+Installed (as the [Renovate GitHub App](https://github.com/apps/renovate) on this repo — no
+in-repo workflow needed) and configured via `renovate.json` at the repo root. It opens PRs for:
+
+- Addon chart bumps — Renovate's built-in `argocd` manager reads `targetRevision` out of the
+  `Application` manifests under `argocd/`.
+- The pinned ArgoCD install tag in `argocd/install/kustomization.yaml` — a `customManagers` regex
+  rule tracks the `argoproj/argo-cd` GitHub releases and bumps the `raw.githubusercontent.com`
+  tag in the remote-resource URL.
+
+`extends: ["config:recommended"]` — no automerge, so every bump still lands as a normal PR to
+review and merge by hand, same as the manual bumps this replaces.
+
 ### Kargo (planned)
 
 Not yet implemented. Planned scope: standalone applications hosted on this cluster — starting with
@@ -492,8 +507,8 @@ promotion, since each app actually has separate dev/prd environments to promote 
 **Not used for the cluster addons** in `argocd/apps/` — there's a single cluster and no dev/prd
 split for infra, so there's nothing to promote between; a chart-version bump there already gets a
 reviewable diff via a normal git PR, which is the same thing Kargo's rendered-manifest review would
-add. Addon version bumps stay manual, or move to [Renovate](https://docs.renovatebot.com/) later if
-that automation becomes worth adding — not tracked as a blocker, just a possible future addition.
+add. Addon version bumps are automated via [Renovate](#renovate) instead, which opens that same
+kind of reviewable PR.
 
 This section will be filled in once bootstrapped.
 
