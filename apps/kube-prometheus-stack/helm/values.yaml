@@ -82,10 +82,13 @@ alertmanager:
       - telegram-bot-token
   # Ported from the old homelab-gitops repo's Alertmanager config. Only route/receivers are set here -
   # global/inhibit_rules/templates are left alone so the chart's own sensible defaults (severity-based
-  # inhibition, etc.) still apply via Helm's map merge. The chart's default route already carves out
-  # Watchdog (kube-prometheus-stack's built-in always-firing heartbeat, confirmed live) to the 'null'
-  # receiver - kept here so it doesn't spam Telegram, and doubles as the "did this pipeline actually
-  # wire up" signal (resolves paths through Watchdog->null instead, still exercises the routing tree).
+  # inhibition, etc.) still apply via Helm's map merge. BUT route.routes is a list, and Helm doesn't
+  # deep-merge lists - ours fully replaces the chart's default list instead of adding to it. The
+  # chart's default route.routes carves out both Watchdog (kube-prometheus-stack's built-in
+  # always-firing heartbeat, confirmed live) AND InfoInhibitor (severity=info alerts) to the 'null'
+  # receiver - both matchers must stay here explicitly, or that alert falls through to the top-level
+  # `receiver: telegram` below and spams Telegram (confirmed live: InfoInhibitor's own description
+  # says it should route to null, but only Watchdog was carried over here, so it didn't).
   config:
     route:
       receiver: telegram
@@ -99,7 +102,7 @@ alertmanager:
       routes:
         - receiver: "null"
           matchers:
-            - alertname = "Watchdog"
+            - alertname =~ "Watchdog|InfoInhibitor"
     receivers:
       - name: "null"
       - name: telegram
