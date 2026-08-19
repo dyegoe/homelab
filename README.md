@@ -266,7 +266,9 @@ For BGP configuration, refer to the [Advanced Networking](#advanced-networking) 
 
 This cluster is managed via [ArgoCD](https://argo-cd.readthedocs.io/), including its own
 installation — ArgoCD manages itself. [Kargo](https://kargo.io/) is planned on top of this for
-promotion and rendered-manifest review; see [Kargo (planned)](#kargo-planned) — not implemented yet.
+multi-environment promotion of standalone applications hosted here (e.g. a personal website with
+`dev`/`prd` namespaces) — not for the cluster addons below; see
+[Kargo (planned)](#kargo-planned) — not implemented yet.
 
 Principles:
 
@@ -278,9 +280,10 @@ Principles:
   since the `Application` object is itself git-tracked; the actual hard requirement is **never** a
   wall of imperative `helm --set` flags, which get no diff at all. A standalone file still earns
   its keep on tooling (`helm template`/`helm lint`/`helm diff` work directly against it, no
-  extraction needed), review signal (a values change and `Application`-plumbing change — sync
-  policy, `ignoreDifferences`, sync-wave — don't get bundled into the same file/diff), and it's
-  what keeps Kargo's rendering workflow (planned) clean to build on top of later.
+  extraction needed) and review signal (a values change and `Application`-plumbing change — sync
+  policy, `ignoreDifferences`, sync-wave — don't get bundled into the same file/diff) — the same
+  structure would also make an automated version-bump tool (e.g. Renovate) produce a clean,
+  reviewable diff if one is added later.
 - Everything — including ArgoCD's own install — lives in this one repo. No separate
   `homelab-gitops` repo.
 
@@ -480,9 +483,19 @@ diagnose, because nothing rendered a reviewable diff before it reached the clust
 
 ### Kargo (planned)
 
-Not yet implemented. Planned scope: a single Warehouse feeding a single Stage (this one cluster) —
-used for its PR-gated rendered-manifest review (Kargo's `hydrateTo` + a review branch), not
-multi-environment promotion. This section will be filled in once bootstrapped.
+Not yet implemented. Planned scope: standalone applications hosted on this cluster — starting with
+a personal website — each with a `dev` and `prd` namespace/Stage. A Warehouse watches the app's
+image (or chart) source, Freight flows through a `dev` Stage, gets verified, then promotes to `prd`
+via Kargo's `hydrateTo` + review-branch rendered-manifest diff. This is genuine multi-environment
+promotion, since each app actually has separate dev/prd environments to promote between.
+
+**Not used for the cluster addons** in `argocd/apps/` — there's a single cluster and no dev/prd
+split for infra, so there's nothing to promote between; a chart-version bump there already gets a
+reviewable diff via a normal git PR, which is the same thing Kargo's rendered-manifest review would
+add. Addon version bumps stay manual, or move to [Renovate](https://docs.renovatebot.com/) later if
+that automation becomes worth adding — not tracked as a blocker, just a possible future addition.
+
+This section will be filled in once bootstrapped.
 
 ### Rotating the ArgoCD repo credential
 

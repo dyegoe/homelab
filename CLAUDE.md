@@ -7,8 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This repo sets up a homelab Kubernetes cluster running on Talos Linux. The cluster itself was
 bootstrapped manually (see README.md note on the pre-GitOps bootstrap process). GitOps via ArgoCD
 is live — ArgoCD manages its own installation plus an addon App-of-Apps (see "GitOps architecture"
-below and README.md's `GitOps` section for the full runbook). Kargo is planned on top but not yet
-implemented.
+below and README.md's `GitOps` section for the full runbook). [Kargo](https://kargo.io/) is planned
+but not yet implemented, scoped to standalone applications this cluster will host (e.g. a personal
+website with `dev`/`prd` namespaces) where it does real multi-environment promotion — not the
+cluster addons, which have no dev/prd split and bump versions via a plain git PR (manually, or later
+via Renovate).
 
 ## Architecture
 
@@ -62,9 +65,10 @@ README.md's `GitOps` section — that's the canonical reference. Summary for qui
   real cause of a real incident on this cluster: a wrong `k8sServiceHost` value shipped via `--set`
   and took an hour to diagnose, because nothing rendered a reviewable diff before it reached the
   cluster). A standalone values file is still worth it on its own merits: local tooling (`helm
-template`/`lint`/`diff` work directly against it), review signal (a values change and
-  `Application`-plumbing change don't get bundled in the same file/diff), and it's what keeps
-  Kargo's rendering workflow (planned) clean to build on later. Extra plain manifests an addon needs
+template`/`lint`/`diff` work directly against it) and review signal (a values change and
+  `Application`-plumbing change don't get bundled in the same file/diff) — also what would make an
+  automated version-bump tool (e.g. Renovate) produce a clean, reviewable diff if one is added
+  later. Extra plain manifests an addon needs
   beyond its Helm chart (e.g. Cilium's BGP/LoadBalancerIPPool/HTTPRoute config) go in a sibling
   `apps/<name>/kustomization.yaml` (app-level, not under `helm/`), added as a third, non-`ref`
   source on the same `Application` — see `gateway-crds.yaml` for the same idea applied to a
@@ -73,9 +77,13 @@ template`/`lint`/`diff` work directly against it), review signal (a values chang
   `syncPolicy.automated` off on first commit, sync once manually, confirm the diff is clean, only
   then enable `automated: {prune: true, selfHeal: true}` in a follow-up commit.
 - Everything lives in this same repo — no separate `homelab-gitops` repo.
-- **Kargo** (not yet implemented): planned as a single Warehouse feeding a single Stage (this one
-  cluster) — used for its PR-gated rendered-manifest review, not multi-environment promotion. Don't
-  design dev/staging/prod promotion chains for this; there's nothing to promote between.
+- **Kargo** (not yet implemented): scoped to standalone applications hosted on this cluster (e.g. a
+  personal website), each with its own `dev`/`prd` namespaces — a real Warehouse → Stage → Stage
+  promotion chain with verification gates, which is what Kargo is actually built for. **Not** used
+  for the cluster addons in `argocd/apps/` — there's no dev/prd split for infra, and a git PR
+  already gives the same rendered-diff review Kargo's `hydrateTo` would add. Addon version bumps
+  stay a manual git PR, or later via Renovate if that becomes worth adding — don't wire addons into
+  Kargo Warehouses/Stages.
 
 ## Tooling
 
