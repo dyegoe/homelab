@@ -492,6 +492,10 @@ in-repo workflow needed) and configured via `renovate.json` at the repo root. It
 - The pinned ArgoCD install tag in `argocd/install/kustomization.yaml` — a `customManagers` regex
   rule tracks the `argoproj/argo-cd` GitHub releases and bumps the `raw.githubusercontent.com`
   tag in the remote-resource URL.
+- Plain-manifest image tags (an addon with no Helm chart at all, e.g. `cloudflared`'s
+  `apps/cloudflared/deployment-cloudflared.yaml`) — the `kubernetes` manager, scoped to
+  `apps/**/deployment*.yaml`. It ships with no default file match, so each such addon needs its
+  path added explicitly (see `renovate.json`).
 
 `extends: ["config:recommended"]` — no automerge, so every bump still lands as a normal PR to
 review and merge by hand, same as the manual bumps this replaces.

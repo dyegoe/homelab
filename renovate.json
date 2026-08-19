@@ -4,6 +4,9 @@
   "argocd": {
     "managerFilePatterns": ["/^argocd/.+\\.ya?ml$/"]
   },
+  "kubernetes": {
+    "managerFilePatterns": ["/^apps/.+/deployment.*\\.ya?ml$/"]
+  },
   "customManagers": [
     {
       "customType": "regex",
