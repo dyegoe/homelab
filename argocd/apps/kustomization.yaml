@@ -18,3 +18,4 @@ resources:
   - kube-prometheus-stack.yaml
   - loki.yaml
   - alloy.yaml
+  - kargo.yaml

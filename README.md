@@ -19,7 +19,7 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
     - [Adopting existing (non-GitOps) resources](#adopting-existing-non-gitops-resources)
     - [Current Applications](#current-applications)
     - [Renovate](#renovate)
-    - [Kargo (planned)](#kargo-planned)
+    - [Kargo](#kargo)
     - [Rotating the ArgoCD repo credential](#rotating-the-argocd-repo-credential)
   - [Advanced Networking](#advanced-networking)
     - [Mikrotik BGP configuration](#mikrotik-bgp-configuration)
@@ -266,10 +266,10 @@ For BGP configuration, refer to the [Advanced Networking](#advanced-networking) 
 ## GitOps
 
 This cluster is managed via [ArgoCD](https://argo-cd.readthedocs.io/), including its own
-installation — ArgoCD manages itself. [Kargo](https://kargo.io/) is planned on top of this for
+installation — ArgoCD manages itself. [Kargo](https://kargo.io/) is installed on top of this for
 multi-environment promotion of standalone applications hosted here (e.g. a personal website with
-`dev`/`prd` namespaces) — not for the cluster addons below; see
-[Kargo (planned)](#kargo-planned) — not implemented yet.
+`dev`/`prd` namespaces) — not for the cluster addons below; see [Kargo](#kargo). The platform is
+up, but no Warehouse/Stage/Project exists yet — that comes once a standalone app needs it.
 
 Principles:
 
@@ -481,6 +481,7 @@ diagnose, because nothing rendered a reviewable diff before it reached the clust
 | `kube-prometheus-stack`         | `-1`      | yes       | After `longhorn` - Prometheus/Grafana persistence needs a working storage class                                                                                                  |
 | `loki`                          | `-1`      | yes       | Same storage dependency as above                                                                                                                                                 |
 | `alloy`                         | `0`       | yes       | Log shipping - pods via the Kubernetes API, Talos's own logs via a LoadBalancer Service                                                                                          |
+| `kargo`                         | `1`       | yes       | Platform only - no Warehouse/Stage/Project yet, see [Kargo](#kargo)                                                                                                              |
 
 ### Renovate
 
@@ -503,19 +504,64 @@ review and merge by hand, same as the manual bumps this replaces.
 **Dashboard:** [developer.mend.io/github/dyegoe/homelab](https://developer.mend.io/github/dyegoe/homelab)
 — Mend's view of open/pending updates, independent of digging through PRs or branches in GitHub.
 
-### Kargo (planned)
+### Kargo
 
-Not yet implemented. Planned scope: standalone applications hosted on this cluster — starting with
-a personal website — each with a `dev` and `prd` namespace/Stage. A Warehouse watches the app's
-image (or chart) source, Freight flows through a `dev` Stage, gets verified, then promotes to `prd`
-via Kargo's `hydrateTo` + review-branch rendered-manifest diff. This is genuine multi-environment
-promotion, since each app actually has separate dev/prd environments to promote between.
+The platform itself is installed as an addon (`argocd/apps/kargo.yaml`, sync-wave `1` — after
+`onepassword`, `cert-manager`, and `gateway`, which it depends on); no Warehouse/Stage/Project
+exists yet. Scope once the standalone website app is ready (built in a separate session): each such
+app — starting with the personal website — gets a `dev` and `prd` namespace/Stage. A Warehouse
+watches the app's image (or chart) source, Freight flows through a `dev` Stage, gets verified, then
+promotes to `prd` via Kargo's `hydrateTo` + review-branch rendered-manifest diff. This is genuine
+multi-environment promotion, since each app actually has separate dev/prd environments to promote
+between.
 
 **Not used for the cluster addons** in `argocd/apps/` — there's a single cluster and no dev/prd
 split for infra, so there's nothing to promote between; a chart-version bump there already gets a
 reviewable diff via a normal git PR, which is the same thing Kargo's rendered-manifest review would
 add. Addon version bumps are automated via [Renovate](#renovate) instead, which opens that same
 kind of reviewable PR.
+
+**Chart:** `oci://ghcr.io/akuity/kargo-charts/kargo`, pinned in `argocd/apps/kargo.yaml`. CRDs
+(`Warehouse`/`Stage`/`Project`/...) are bundled in the chart itself — unlike
+`prometheus-operator-crds`, nothing else in this cluster needs them early, so no separate CRD-only
+Application was needed.
+
+**Admin login:** `api.secret.name: kargo-admin` in `apps/kargo/helm/values.yaml` points at a Secret
+materialized by `apps/kargo/onepassword-kargo-admin.yaml` (same 1Password-operator pattern as
+Grafana/cloudflared/the ArgoCD repo credential — see [1Password Operator](#1password-operator)),
+rather than inlining `api.adminAccount.passwordHash`/`tokenSigningKey` in git. One-time setup, since
+this repo never runs cluster-mutating or 1Password-mutating commands on your behalf:
+
+1. Generate a password, its bcrypt hash, and a token signing key (same recipe as
+   [Kargo's own install docs](https://docs.kargo.io/operator-guide/basic-installation)):
+
+   ```bash
+   pass=$(openssl rand -base64 48 | tr -d "=+/" | head -c 32)
+   hashed_pass=$(htpasswd -bnBC 10 "" "$pass" | tr -d ':\n')
+   signing_key=$(openssl rand -base64 48 | tr -d "=+/" | head -c 32)
+   echo "password: $pass"
+   echo "hash: $hashed_pass"
+   echo "signing key: $signing_key"
+   ```
+
+2. Create a 1Password item at vault `Kubernetes`, named `kargo-admin-home-lab`, with three custom
+   `text`/`password` fields (field **labels** become Secret keys verbatim, same as the Telegram bot
+   token item — see [1Password Operator](#1password-operator)):
+   - `ADMIN_ACCOUNT_PASSWORD_HASH` → `$hashed_pass`
+   - `ADMIN_ACCOUNT_TOKEN_SIGNING_KEY` → `$signing_key`
+   - a field for the plaintext `$pass` too (e.g. `admin-password-plaintext`) — only Kargo's UI login
+     needs it, but Kargo itself never sees the plaintext, so it has to be saved somewhere or it's
+     lost.
+
+3. Sync `kargo` in ArgoCD (or wait for auto-sync) and log in to `https://kargo.nodes.ee` with
+   username `admin` and the plaintext password from step 2.
+
+**UI access:** `apps/kargo/httproute-kargo.yaml` (+ `httproute-kargo-redirect.yaml` for the
+`http→https` redirect) route `kargo.nodes.ee` through the same central Gateway (`apps/gateway`) as
+Grafana/Prometheus — `api.tls.enabled: false` + `api.tls.terminatedUpstream: true` in
+`apps/kargo/helm/values.yaml` because the Gateway terminates TLS with the shared `*.nodes.ee`
+wildcard cert, not Kargo's own self-signed one. Confirmed via `helm template` before committing:
+the `kargo-api` Service listens on port `80`, matching the HTTPRoute's `backendRefs`.
 
 This section will be filled in once bootstrapped.
 
