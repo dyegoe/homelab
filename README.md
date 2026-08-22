@@ -765,6 +765,24 @@ CoreDNS, etc.) under **Dashboards**. Two known gaps, not bugs to chase if redisc
   queries) — accepted as a known gap rather than adding `metricRelabelings` to every `ServiceMonitor`
   across every addon.
 
+Every addon with a live Prometheus target also ships its own dashboard(s), as a `ConfigMap` labeled
+`grafana_dashboard: "1"` in `apps/<name>/dashboards/` (auto-discovered by Grafana's sidecar, which has
+`searchNamespace: ALL`) — see each addon's `kustomization.yaml` for the list and provenance (ported from
+upstream vs. hand-built). Loki's and Alloy's are hand-built rather than ported verbatim from their
+official upstream mixins (`grafana/loki`'s `loki-mixin`, `grafana/alloy`'s `alloy-mixin`):
+
+- Loki's mixin dashboards (reads/writes/chunks/etc.) are written for a microservices-split deployment
+  (per-component jobs like `loki-ingester`/`loki-querier`) and key panels off recording rules
+  (`cluster_job_route:*:sum_rate`) this cluster doesn't deploy — irrelevant here since Loki runs as
+  `deploymentMode: SingleBinary`. `apps/loki/dashboards/loki.json` covers the same operational signals
+  (request rate/latency, ingestion, discards, chunk flush, query latency) with plain PromQL instead.
+- Alloy's mixin dashboards were kept close to upstream (`apps/alloy/dashboards/*.json`) but had their
+  multi-cluster `cluster`/`namespace`/`job` template variables collapsed to a single `pod` selector,
+  since this Prometheus never sets a `cluster` label on Alloy's series — same underlying gap as the
+  kubernetes-mixin one above, just resolved per-dashboard here instead of left as a gap.
+
+Every panel's PromQL was checked against live Prometheus metric names before writing, not assumed.
+
 ### Known log noise (recheck on next Kubernetes upgrade)
 
 `{namespace="kube-system"} |= "2379"` shows recurring `kube-apiserver` warnings on all 3 nodes, every

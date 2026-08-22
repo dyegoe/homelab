@@ -3,3 +3,20 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - service-talos-logs.yaml
+
+# Grafana's sidecar (searchNamespace: ALL) auto-discovers any ConfigMap labeled grafana_dashboard:
+# "1" in any namespace. Adapted from the official grafana/alloy operations/alloy-mixin: dropped the
+# multi-cluster "cluster" template variable (this Prometheus never sets a cluster label - same known
+# gap as the kube-prometheus-stack mixin dashboards) and panels whose metrics aren't emitted by this
+# deployment (loki.source.file/journal aren't used here; only loki.source.kubernetes + otelcol).
+configMapGenerator:
+  - name: grafana-dashboard-alloy
+    files:
+      - dashboards/alloy-controller.json
+      - dashboards/alloy-resources.json
+      - dashboards/alloy-loki.json
+
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    grafana_dashboard: "1"
