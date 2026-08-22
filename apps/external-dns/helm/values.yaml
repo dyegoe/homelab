@@ -9,7 +9,7 @@ sources:
   - gateway-httproute
   - gateway-grpcroute
 deploymentAnnotations:
-  operator.1password.io/item-path: "vaults/Kubernetes/items/cloudflare-personal-api-token-home-lab"
+  operator.1password.io/item-path: "vaults/Kubernetes/items/homelab-cloudflare-personal-api-token"
   operator.1password.io/item-name: "cloudflare-api-token"
 serviceMonitor:
   enabled: true

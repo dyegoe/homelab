@@ -334,7 +334,7 @@ it can manage itself), then handing over to GitOps.
 Before any of this, create the 1Password item the repo credential is sourced from — vault `Kubernetes`:
 
 - Type: **Login**
-- Name: `github-personal-access-token-argocd`
+- Name: `homelab-argocd-github-personal-access-token`
 - Username: `dyegoe`
 - Password: a GitHub fine-grained PAT, scoped read-only to this repo
 - Rename the default `website` field to `url`, value `https://github.com/dyegoe/homelab.git`
@@ -354,7 +354,7 @@ kubectl -n argocd create secret generic repo-homelab \
   --from-literal=type=git \
   --from-literal=url=https://github.com/dyegoe/homelab.git \
   --from-literal=username=dyegoe \
-  --from-literal=password=$(op item get "github-personal-access-token-argocd" --fields password --reveal)
+  --from-literal=password=$(op item get "homelab-argocd-github-personal-access-token" --fields password --reveal)
 kubectl -n argocd label secret repo-homelab argocd.argoproj.io/secret-type=repository
 
 # Install ArgoCD (pin the version — check https://github.com/argoproj/argo-cd/releases for latest)
@@ -544,7 +544,7 @@ this repo never runs cluster-mutating or 1Password-mutating commands on your beh
    echo "signing key: $signing_key"
    ```
 
-2. Create a 1Password item at vault `Kubernetes`, named `kargo-admin-home-lab`, with three custom
+2. Create a 1Password item at vault `Kubernetes`, named `homelab-kargo-admin`, with three custom
    `text`/`password` fields (field **labels** become Secret keys verbatim, same as the Telegram bot
    token item — see [1Password Operator](#1password-operator)):
    - `ADMIN_ACCOUNT_PASSWORD_HASH` → `$hashed_pass`
@@ -574,7 +574,7 @@ was up, it took over managing this Secret via a `OnePasswordItem` CR (see
 [Migrating a bootstrap secret to 1Password](#migrating-a-bootstrap-secret-to-1password) for how that
 migration was done) — rotation is no longer a manual `kubectl patch`.
 
-**Source of truth:** 1Password item `github-personal-access-token-argocd` (vault `Kubernetes`), field
+**Source of truth:** 1Password item `homelab-argocd-github-personal-access-token` (vault `Kubernetes`), field
 `password`. Rotate roughly every 30-90 days as best practice.
 
 **To rotate:** update the `password` field on that 1Password item with the new PAT. The 1Password
@@ -595,7 +595,7 @@ auto-sync loop also picks up the new credential within a few minutes.
 ```bash
 kubectl -n argocd patch secret repo-homelab \
   --type=merge \
-  -p "{\"stringData\":{\"password\":\"$(op item get 'github-personal-access-token-argocd' --fields password --reveal)\"}}"
+  -p "{\"stringData\":{\"password\":\"$(op item get 'homelab-argocd-github-personal-access-token' --fields password --reveal)\"}}"
 ```
 
 ## Advanced Networking
@@ -692,7 +692,7 @@ Operator — can sync anything. Once the Operator is up, it can take over managi
      labels:
        argocd.argoproj.io/secret-type: repository
    spec:
-     itemPath: "vaults/Kubernetes/items/github-personal-access-token-argocd"
+     itemPath: "vaults/Kubernetes/items/homelab-argocd-github-personal-access-token"
    ```
 
 2. Wire it into `argocd/install/kustomization.yaml`'s `resources`.
@@ -743,7 +743,7 @@ StatefulSet recreation) — see the comments in those files for specifics.
 
 ### Accessing Grafana
 
-`https://grafana.nodes.ee`. Credentials come from the `Home Lab Grafana` 1Password item (`username`/
+`https://grafana.nodes.ee`. Credentials come from the `homelab-grafana` 1Password item (`username`/
 `confirmNew` fields), wired in via `grafana.podAnnotations` in
 `apps/kube-prometheus-stack/helm/values.yaml` (same 1Password-operator annotation pattern as
 `cloudflared`/`external-dns` — see [1Password Operator](#1password-operator)).
@@ -782,7 +782,7 @@ Talos service.
 
 Alertmanager routes to a `telegram` receiver by default (`apps/kube-prometheus-stack/helm/values.yaml`'s
 `alertmanager.config`), ported from the old homelab-gitops repo's setup. The bot token/chat ID come from
-the existing `telegram-bot-token-home-lab` 1Password item (API Credential type: `credential` field is the
+the existing `homelab-telegram-bot-token` 1Password item (API Credential type: `credential` field is the
 bot token, `chat_id` is the target chat) via the same `operator.1password.io/item-path` annotation pattern
 used for Grafana/cloudflared — see [1Password Operator](#1password-operator) — injected as a Secret
 mounted into the Alertmanager pod at `/etc/alertmanager/secrets/telegram-bot-token/`.

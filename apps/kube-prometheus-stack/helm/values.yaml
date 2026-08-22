@@ -156,7 +156,7 @@ grafana:
   fullnameOverride: grafana
   defaultDashboardsTimezone: browser
   podAnnotations:
-    operator.1password.io/item-path: "vaults/Kubernetes/items/Home Lab Grafana"
+    operator.1password.io/item-path: "vaults/Kubernetes/items/homelab-grafana"
     operator.1password.io/item-name: "grafana-admin-password"
   admin:
     existingSecret: grafana-admin-password

@@ -4,8 +4,8 @@ kind: Deployment
 metadata:
   name: cloudflared
   annotations:
-    operator.1password.io/item-path: "vaults/Kubernetes/items/cloudflared-tunnel-token"
-    operator.1password.io/item-name: "cloudflared-tunnel-token"
+    operator.1password.io/item-path: "vaults/Kubernetes/items/homelab-cloudflared-tunnel-token"
+    operator.1password.io/item-name: "homelab-cloudflared-tunnel-token"
 spec:
   replicas: 2
   revisionHistoryLimit: 1
@@ -30,7 +30,7 @@ spec:
             - name: TUNNEL_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: cloudflared-tunnel-token
+                  name: homelab-cloudflared-tunnel-token
                   key: credential
           command:
             # Configures tunnel run parameters
