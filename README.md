@@ -334,7 +334,7 @@ it can manage itself), then handing over to GitOps.
 Before any of this, create the 1Password item the repo credential is sourced from — vault `Kubernetes`:
 
 - Type: **Login**
-- Name: `homelab-argocd-github-personal-access-token`
+- Name: `homelab-gh-pat-argocd-homelab`
 - Username: `dyegoe`
 - Password: a GitHub fine-grained PAT, scoped read-only to this repo
 - Rename the default `website` field to `url`, value `https://github.com/dyegoe/homelab.git`
@@ -354,7 +354,7 @@ kubectl -n argocd create secret generic repo-homelab \
   --from-literal=type=git \
   --from-literal=url=https://github.com/dyegoe/homelab.git \
   --from-literal=username=dyegoe \
-  --from-literal=password=$(op item get "homelab-argocd-github-personal-access-token" --fields password --reveal)
+  --from-literal=password=$(op item get "homelab-gh-pat-argocd-homelab" --fields password --reveal)
 kubectl -n argocd label secret repo-homelab argocd.argoproj.io/secret-type=repository
 
 # Install ArgoCD (pin the version — check https://github.com/argoproj/argo-cd/releases for latest)
@@ -578,7 +578,7 @@ was up, it took over managing this Secret via a `OnePasswordItem` CR (see
 [Migrating a bootstrap secret to 1Password](#migrating-a-bootstrap-secret-to-1password) for how that
 migration was done) — rotation is no longer a manual `kubectl patch`.
 
-**Source of truth:** 1Password item `homelab-argocd-github-personal-access-token` (vault `Kubernetes`), field
+**Source of truth:** 1Password item `homelab-gh-pat-argocd-homelab` (vault `Kubernetes`), field
 `password`. Rotate roughly every 30-90 days as best practice.
 
 **To rotate:** update the `password` field on that 1Password item with the new PAT. The 1Password
@@ -599,7 +599,7 @@ auto-sync loop also picks up the new credential within a few minutes.
 ```bash
 kubectl -n argocd patch secret repo-homelab \
   --type=merge \
-  -p "{\"stringData\":{\"password\":\"$(op item get 'homelab-argocd-github-personal-access-token' --fields password --reveal)\"}}"
+  -p "{\"stringData\":{\"password\":\"$(op item get 'homelab-gh-pat-argocd-homelab' --fields password --reveal)\"}}"
 ```
 
 ## Advanced Networking
@@ -696,7 +696,7 @@ Operator — can sync anything. Once the Operator is up, it can take over managi
      labels:
        argocd.argoproj.io/secret-type: repository
    spec:
-     itemPath: "vaults/Kubernetes/items/homelab-argocd-github-personal-access-token"
+     itemPath: "vaults/Kubernetes/items/homelab-gh-pat-argocd-homelab"
    ```
 
 2. Wire it into `argocd/install/kustomization.yaml`'s `resources`.
