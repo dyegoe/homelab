@@ -30,6 +30,14 @@ api:
       cpu: 200m
       memory: 256Mi
 controller:
+  # api and garbageCollector have no Prometheus metrics support in this chart at all - only
+  # controller/managementController/webhooksServer do. Selector-less Prometheus
+  # (serviceMonitorSelectorNilUsesHelmValues: false in kube-prometheus-stack's values.yaml) already
+  # picks up any ServiceMonitor cluster-wide, so no additionalLabels needed here.
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
   resources:
     requests:
       cpu: 10m
@@ -54,6 +62,10 @@ externalWebhooksServer:
       cpu: 100m
       memory: 128Mi
 webhooksServer:
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
   resources:
     requests:
       cpu: 10m
@@ -62,6 +74,10 @@ webhooksServer:
       cpu: 100m
       memory: 128Mi
 managementController:
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
   resources:
     requests:
       cpu: 10m
