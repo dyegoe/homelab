@@ -563,7 +563,11 @@ Grafana/Prometheus — `api.tls.enabled: false` + `api.tls.terminatedUpstream: t
 wildcard cert, not Kargo's own self-signed one. Confirmed via `helm template` before committing:
 the `kargo-api` Service listens on port `80`, matching the HTTPRoute's `backendRefs`.
 
-This section will be filled in once bootstrapped.
+**Metrics/dashboard:** `controller`/`managementController`/`webhooksServer` have Prometheus metrics
+
+- `ServiceMonitor` enabled in `apps/kargo/helm/values.yaml` (`api`/`garbageCollector` have no metrics
+  support in the chart). See [Metrics dashboards](#metrics-dashboards) for what
+  `apps/kargo/dashboards/kargo-controllers.json` covers and the gap around business-level metrics.
 
 ### Rotating the ArgoCD repo credential
 
@@ -826,6 +830,16 @@ official upstream mixins (`grafana/loki`'s `loki-mixin`, `grafana/alloy`'s `allo
   multi-cluster `cluster`/`namespace`/`job` template variables collapsed to a single `pod` selector,
   since this Prometheus never sets a `cluster` label on Alloy's series — same underlying gap as the
   kubernetes-mixin one above, just resolved per-dashboard here instead of left as a gap.
+- Kargo has no official Grafana dashboard/mixin at all, and — as of chart `1.11.2` — no
+  business-level metrics either (no per-Promotion/Stage/Warehouse counters); only `controller`,
+  `managementController`, and `webhooksServer` expose metrics, and only generic
+  controller-runtime/workqueue/Go-runtime instrumentation (`api` and `garbageCollector` have no
+  metrics support in the chart at all). `apps/kargo/dashboards/kargo-controllers.json` covers
+  reconcile rate/errors/latency and workqueue depth/latency **per Kargo resource type** — the
+  generic reconciler metrics' `controller` label is still set to the real resource name
+  (`promotion`/`stage`/`warehouse`/`control_flow_stage`/`project`/...), so this is a genuine signal,
+  just not promotion counts or verification outcomes. Recheck once real Warehouses/Stages exist and
+  if a newer Kargo version ever adds business metrics.
 
 Every panel's PromQL was checked against live Prometheus metric names before writing, not assumed.
 

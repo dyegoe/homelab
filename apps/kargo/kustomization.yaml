@@ -5,3 +5,19 @@ resources:
   - onepassword-kargo-admin.yaml
   - httproute-kargo.yaml
   - httproute-kargo-redirect.yaml
+
+# Grafana's sidecar (searchNamespace: ALL) auto-discovers any ConfigMap labeled grafana_dashboard:
+# "1" in any namespace. Hand-built, not ported - Kargo has no official Grafana dashboard/mixin, and
+# exposes no business-level metrics (no per-Promotion/Stage/Warehouse counters) as of chart 1.11.2,
+# only generic controller-runtime/workqueue/Go-runtime instrumentation - see the dashboard's own
+# description panel for what that does and doesn't cover. Every panel's PromQL was checked against
+# live Prometheus metric names before writing.
+configMapGenerator:
+  - name: grafana-dashboard-kargo
+    files:
+      - dashboards/kargo-controllers.json
+
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    grafana_dashboard: "1"
