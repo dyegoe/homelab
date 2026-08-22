@@ -100,7 +100,7 @@ What's checked (`.pre-commit-config.yaml`):
 Visit [TalOS Image factory](https://factory.talos.dev/) (v1.3.3, latest at the time of writing) and select the following options:
 
 1. **Platform**: bare-metal
-2. **Version**: 1.13.8 (latest at the time of writing)
+2. **Version**: 1.13.9 (latest at the time of writing)
 3. **Architecture**: amd64, turn secure boot on
 4. **System extensions**: siderolabs/iscsi-tools, siderolabs/util-linux-tools
 5. **Customization**: let as it is
@@ -110,11 +110,11 @@ Important outputs:
 - Schematic Ready
   - Your image schematic ID is: 613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245
 - SecureBoot ISO
-  - [https://factory.talos.dev/image/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245/v1.13.8/metal-amd64-secureboot.iso]
+  - [https://factory.talos.dev/image/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245/v1.13.9/metal-amd64-secureboot.iso]
 - Initial Installation
-  - `factory.talos.dev/metal-installer-secureboot/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245:v1.13.8`
+  - `factory.talos.dev/metal-installer-secureboot/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245:v1.13.9`
 - Upgrading Talos Linux
-  - `factory.talos.dev/metal-installer-secureboot/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245:v1.13.8`
+  - `factory.talos.dev/metal-installer-secureboot/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245:v1.13.9`
 
 Download the SecureBoot ISO and "burn" it to a USB stick.
 
