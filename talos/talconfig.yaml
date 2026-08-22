@@ -3,7 +3,7 @@ clusterName: k8s.nodes.ee
 endpoint: https://172.31.86.10:6443
 
 # The Talos version to run
-talosVersion: v1.13.8
+talosVersion: v1.13.9
 kubernetesVersion: v1.36.2
 
 # Apply these baseline configurations to ALL nodes
