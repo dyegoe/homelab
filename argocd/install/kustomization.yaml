@@ -10,6 +10,7 @@ resources:
   - servicemonitor-argocd-server.yaml
   - servicemonitor-argocd-notifications-controller.yaml
   - onepassword-github-dyegoe-homelab.yaml
+  - onepassword-github-dyegoe-website.yaml
 patches:
   - path: patch-deployments.yaml
     target:
