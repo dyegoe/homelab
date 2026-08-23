@@ -276,7 +276,7 @@ Principles:
 - **App-of-Apps** for the addon bundle (Cilium, observability, etc.) — a small, deliberate
   list. Not ApplicationSet, which solves a different problem (dynamic multi-cluster/multi-tenant
   fleets) this single-cluster homelab doesn't have.
-- Helm values live in `apps/<app>/helm/values.yaml` — real, standalone YAML — rather than inlined
+- Helm values live in `addons/<app>/helm/values.yaml` — real, standalone YAML — rather than inlined
   as `valuesObject` in the `Application` CRD. Both are equally visible in `git diff`/PR review,
   since the `Application` object is itself git-tracked; the actual hard requirement is **never** a
   wall of imperative `helm --set` flags, which get no diff at all. A standalone file still earns
@@ -296,20 +296,20 @@ argocd/
 ├── argocd.yaml              # Application: ArgoCD's own installation (self-managed)
 ├── install/
 │   └── kustomization.yaml   # tracks the upstream install.yaml (pinned tag) as a remote resource
-├── apps.yaml                # Application: the addon App-of-Apps
-└── apps/
+├── addons.yaml               # Application: the addon App-of-Apps
+└── addons/
     ├── kustomization.yaml   # lists every addon Application
     ├── cilium.yaml          # Application: Cilium (multi-source: Helm chart + this repo's values)
     └── gateway-crds.yaml    # Application: Gateway API CRDs, sourced directly from the upstream repo
 
-apps/
+addons/
 └── cilium/
     └── helm/
         └── values.yaml      # Cilium Helm values (source of truth, never inlined)
 ```
 
-Each addon gets an `apps/<app>/helm/values.yaml` — one `helm/` subdirectory per app. That leaves
-room for a sibling `apps/<app>/kustomization.yaml` (app-level, not under `helm/`) for any extra
+Each addon gets an `addons/<app>/helm/values.yaml` — one `helm/` subdirectory per app. That leaves
+room for a sibling `addons/<app>/kustomization.yaml` (app-level, not under `helm/`) for any extra
 plain manifests the addon needs beyond what the Helm chart renders, combined into the same
 `Application` as a third source (see [Adding a new Application](#adding-a-new-application-the-pattern)).
 
@@ -319,7 +319,7 @@ and produces two top-level, self-syncing Applications:
 | Application | Sync wave | Source           | Purpose                                                     |
 | ----------- | --------- | ---------------- | ----------------------------------------------------------- |
 | `argocd`    | `-10`     | `argocd/install` | ArgoCD manages its own installation/upgrades                |
-| `apps`      | `-9`      | `argocd/apps`    | App-of-Apps: owns every addon `Application` (e.g. `cilium`) |
+| `addons`    | `-9`      | `argocd/addons`  | App-of-Apps: owns every addon `Application` (e.g. `cilium`) |
 
 Both run with `syncPolicy.automated: {prune: true, selfHeal: true}` — once bootstrapped, upgrading
 ArgoCD or adding/changing an addon is a git commit, not a `kubectl`/`helm` command.
@@ -407,10 +407,15 @@ spec:
       helm:
         releaseName: <app-name>
         valueFiles:
-          - $values/apps/<app-name>/helm/values.yaml
+          - $values/addons/<app-name>/helm/values.yaml
+    # Source to provide references for Helm values
     - repoURL: https://github.com/dyegoe/homelab.git
       targetRevision: main
       ref: values
+    # Source to provide references for Kustomize bases
+    - repoURL: https://github.com/dyegoe/homelab.git
+      targetRevision: main
+      path: addons/<app-name>
   destination:
     server: https://kubernetes.default.svc
     namespace: <target-namespace>
@@ -436,16 +441,16 @@ spec:
 
 Steps:
 
-1. `apps/<app-name>/helm/values.yaml` — the Helm values, as real YAML.
-2. `argocd/apps/<app-name>.yaml` — the `Application`, from the template above.
-3. Add `<app-name>.yaml` to `argocd/apps/kustomization.yaml`'s `resources`.
-4. Commit and push. `apps` (wave `-9`) picks up the new child `Application` automatically.
+1. `addons/<app-name>/helm/values.yaml` — the Helm values, as real YAML.
+2. `argocd/addons/<app-name>.yaml` — the `Application`, from the template above.
+3. Add `<app-name>.yaml` to `argocd/addons/kustomization.yaml`'s `resources`.
+4. Commit and push. `addons` (wave `-9`) picks up the new child `Application` automatically.
 
 For a plain-manifest addition (no Helm chart involved, or extra manifests alongside a chart — e.g.
 `gateway-crds`, or Cilium's BGP/LoadBalancerIPPool/HTTPRoute resources), point a source straight at
 the upstream repo's manifest directory when one exists (`gateway-crds.yaml` sources
 `kubernetes-sigs/gateway-api`'s `config/crd/experimental` path directly — no local mirror needed),
-or add an `apps/<app-name>/kustomization.yaml` in this repo for manifests you own yourself. Either
+or add an `addons/<app-name>/kustomization.yaml` in this repo for manifests you own yourself. Either
 way it's just another entry in the same `Application`'s `sources` list — no `ref`, since only the
 values-reference source needs that.
 
@@ -464,7 +469,7 @@ diagnose, because nothing rendered a reviewable diff before it reached the clust
 | Application                     | Sync wave | Automated | Notes                                                                                                                                                                            |
 | ------------------------------- | --------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `argocd`                        | `-10`     | yes       | Self-managed ArgoCD install                                                                                                                                                      |
-| `apps`                          | `-9`      | yes       | App-of-Apps parent                                                                                                                                                               |
+| `addons`                        | `-9`      | yes       | App-of-Apps parent                                                                                                                                                               |
 | `gateway-crds`                  | `-8`      | yes       | Gateway API CRDs, sourced directly from `kubernetes-sigs/gateway-api`'s `config/crd/experimental` path                                                                           |
 | `snapshot-crds`                 | `-8`      | yes       | CSI volume snapshot CRDs                                                                                                                                                         |
 | `prometheus-operator-crds`      | `-8`      | yes       | Prometheus Operator CRDs only, split from `kube-prometheus-stack` so every other addon's `ServiceMonitor` renders regardless of sync order (see [Observability](#observability)) |
@@ -494,8 +499,8 @@ in-repo workflow needed) and configured via `renovate.json` at the repo root. It
   rule tracks the `argoproj/argo-cd` GitHub releases and bumps the `raw.githubusercontent.com`
   tag in the remote-resource URL.
 - Plain-manifest image tags (an addon with no Helm chart at all, e.g. `cloudflared`'s
-  `apps/cloudflared/deployment-cloudflared.yaml`) — the `kubernetes` manager, scoped to
-  `apps/**/deployment*.yaml`. It ships with no default file match, so each such addon needs its
+  `addons/cloudflared/deployment-cloudflared.yaml`) — the `kubernetes` manager, scoped to
+  `addons/**/deployment*.yaml`. It ships with no default file match, so each such addon needs its
   path added explicitly (see `renovate.json`).
 
 `extends: ["config:recommended"]` — no automerge, so every bump still lands as a normal PR to
@@ -506,7 +511,7 @@ review and merge by hand, same as the manual bumps this replaces.
 
 ### Kargo
 
-The platform itself is installed as an addon (`argocd/apps/kargo.yaml`, sync-wave `1` — after
+The platform itself is installed as an addon (`argocd/addons/kargo.yaml`, sync-wave `1` — after
 `onepassword`, `cert-manager`, and `gateway`, which it depends on); no Warehouse/Stage/Project
 exists yet. Scope once the standalone website app is ready (built in a separate session): each such
 app — starting with the personal website — gets a `dev` and `prd` namespace/Stage. A Warehouse
@@ -515,19 +520,19 @@ promotes to `prd` via Kargo's `hydrateTo` + review-branch rendered-manifest diff
 multi-environment promotion, since each app actually has separate dev/prd environments to promote
 between.
 
-**Not used for the cluster addons** in `argocd/apps/` — there's a single cluster and no dev/prd
+**Not used for the cluster addons** in `argocd/addons/` — there's a single cluster and no dev/prd
 split for infra, so there's nothing to promote between; a chart-version bump there already gets a
 reviewable diff via a normal git PR, which is the same thing Kargo's rendered-manifest review would
 add. Addon version bumps are automated via [Renovate](#renovate) instead, which opens that same
 kind of reviewable PR.
 
-**Chart:** `oci://ghcr.io/akuity/kargo-charts/kargo`, pinned in `argocd/apps/kargo.yaml`. CRDs
+**Chart:** `oci://ghcr.io/akuity/kargo-charts/kargo`, pinned in `argocd/addons/kargo.yaml`. CRDs
 (`Warehouse`/`Stage`/`Project`/...) are bundled in the chart itself — unlike
 `prometheus-operator-crds`, nothing else in this cluster needs them early, so no separate CRD-only
 Application was needed.
 
-**Admin login:** `api.secret.name: kargo-admin` in `apps/kargo/helm/values.yaml` points at a Secret
-materialized by `apps/kargo/onepassword-kargo-admin.yaml` (same 1Password-operator pattern as
+**Admin login:** `api.secret.name: kargo-admin` in `addons/kargo/helm/values.yaml` points at a Secret
+materialized by `addons/kargo/onepassword-kargo-admin.yaml` (same 1Password-operator pattern as
 Grafana/cloudflared/the ArgoCD repo credential — see [1Password Operator](#1password-operator)),
 rather than inlining `api.adminAccount.passwordHash`/`tokenSigningKey` in git. One-time setup, since
 this repo never runs cluster-mutating or 1Password-mutating commands on your behalf:
@@ -556,18 +561,18 @@ this repo never runs cluster-mutating or 1Password-mutating commands on your beh
 3. Sync `kargo` in ArgoCD (or wait for auto-sync) and log in to `https://kargo.nodes.ee` with
    username `admin` and the plaintext password from step 2.
 
-**UI access:** `apps/kargo/httproute-kargo.yaml` (+ `httproute-kargo-redirect.yaml` for the
-`http→https` redirect) route `kargo.nodes.ee` through the same central Gateway (`apps/gateway`) as
+**UI access:** `addons/kargo/httproute-kargo.yaml` (+ `httproute-kargo-redirect.yaml` for the
+`http→https` redirect) route `kargo.nodes.ee` through the same central Gateway (`addons/gateway`) as
 Grafana/Prometheus — `api.tls.enabled: false` + `api.tls.terminatedUpstream: true` in
-`apps/kargo/helm/values.yaml` because the Gateway terminates TLS with the shared `*.nodes.ee`
+`addons/kargo/helm/values.yaml` because the Gateway terminates TLS with the shared `*.nodes.ee`
 wildcard cert, not Kargo's own self-signed one. Confirmed via `helm template` before committing:
 the `kargo-api` Service listens on port `80`, matching the HTTPRoute's `backendRefs`.
 
 **Metrics/dashboard:** `controller`/`managementController`/`webhooksServer` have Prometheus metrics
 
-- `ServiceMonitor` enabled in `apps/kargo/helm/values.yaml` (`api`/`garbageCollector` have no metrics
+- `ServiceMonitor` enabled in `addons/kargo/helm/values.yaml` (`api`/`garbageCollector` have no metrics
   support in the chart). See [Metrics dashboards](#metrics-dashboards) for what
-  `apps/kargo/dashboards/kargo-controllers.json` covers and the gap around business-level metrics.
+  `addons/kargo/dashboards/kargo-controllers.json` covers and the gap around business-level metrics.
 
 ### Rotating the ArgoCD repo credential
 
@@ -605,7 +610,7 @@ kubectl -n argocd patch secret repo-homelab \
 ## Advanced Networking
 
 Cilium's BGP control plane (`CiliumBGPClusterConfig`/`CiliumBGPPeerConfig`/`CiliumBGPAdvertisement` in
-`apps/cilium/`) peers with the Mikrotik router below to advertise `CiliumLoadBalancerIPPool` IPs directly,
+`addons/cilium/`) peers with the Mikrotik router below to advertise `CiliumLoadBalancerIPPool` IPs directly,
 instead of relying on L2 announcements. Confirmed live and working — see the **Cilium BGP** Grafana
 dashboard ([Metrics dashboards](#metrics-dashboards)) for session state, advertised/received routes per
 node.
@@ -740,7 +745,7 @@ Four addons:
   (`otelcol.receiver.tcplog`) via a dedicated LoadBalancer Service.
 
 Resource requests/limits, Grafana's `Recreate` deployment strategy, and Loki's PVC auto-delete guard in
-`apps/kube-prometheus-stack/helm/values.yaml` and `apps/loki/helm/values.yaml` are carried over from
+`addons/kube-prometheus-stack/helm/values.yaml` and `addons/loki/helm/values.yaml` are carried over from
 concrete incidents on this same hardware in the previous iteration of this stack (unbounded resources
 exhausting the 3-node cluster, Grafana stuck on redeploy behind a single RWO PVC, Loki losing history on
 StatefulSet recreation) — see the comments in those files for specifics.
@@ -749,7 +754,7 @@ StatefulSet recreation) — see the comments in those files for specifics.
 
 `https://grafana.nodes.ee`. Credentials come from the `homelab-grafana` 1Password item (`username`/
 `confirmNew` fields), wired in via `grafana.podAnnotations` in
-`apps/kube-prometheus-stack/helm/values.yaml` (same 1Password-operator annotation pattern as
+`addons/kube-prometheus-stack/helm/values.yaml` (same 1Password-operator annotation pattern as
 `cloudflared`/`external-dns` — see [1Password Operator](#1password-operator)).
 
 ### Viewing logs
@@ -784,7 +789,7 @@ Talos service.
 
 ### Alerting (Telegram)
 
-Alertmanager routes to a `telegram` receiver by default (`apps/kube-prometheus-stack/helm/values.yaml`'s
+Alertmanager routes to a `telegram` receiver by default (`addons/kube-prometheus-stack/helm/values.yaml`'s
 `alertmanager.config`), ported from the old homelab-gitops repo's setup. The bot token/chat ID come from
 the existing `homelab-telegram-bot-token` 1Password item (API Credential type: `credential` field is the
 bot token, `chat_id` is the target chat) via the same `operator.1password.io/item-path` annotation pattern
@@ -816,7 +821,7 @@ CoreDNS, etc.) under **Dashboards**. Two known gaps, not bugs to chase if redisc
   across every addon.
 
 Every addon with a live Prometheus target also ships its own dashboard(s), as a `ConfigMap` labeled
-`grafana_dashboard: "1"` in `apps/<name>/dashboards/` (auto-discovered by Grafana's sidecar, which has
+`grafana_dashboard: "1"` in `addons/<name>/dashboards/` (auto-discovered by Grafana's sidecar, which has
 `searchNamespace: ALL`) — see each addon's `kustomization.yaml` for the list and provenance (ported from
 upstream vs. hand-built). Loki's and Alloy's are hand-built rather than ported verbatim from their
 official upstream mixins (`grafana/loki`'s `loki-mixin`, `grafana/alloy`'s `alloy-mixin`):
@@ -824,9 +829,9 @@ official upstream mixins (`grafana/loki`'s `loki-mixin`, `grafana/alloy`'s `allo
 - Loki's mixin dashboards (reads/writes/chunks/etc.) are written for a microservices-split deployment
   (per-component jobs like `loki-ingester`/`loki-querier`) and key panels off recording rules
   (`cluster_job_route:*:sum_rate`) this cluster doesn't deploy — irrelevant here since Loki runs as
-  `deploymentMode: SingleBinary`. `apps/loki/dashboards/loki.json` covers the same operational signals
+  `deploymentMode: SingleBinary`. `addons/loki/dashboards/loki.json` covers the same operational signals
   (request rate/latency, ingestion, discards, chunk flush, query latency) with plain PromQL instead.
-- Alloy's mixin dashboards were kept close to upstream (`apps/alloy/dashboards/*.json`) but had their
+- Alloy's mixin dashboards were kept close to upstream (`addons/alloy/dashboards/*.json`) but had their
   multi-cluster `cluster`/`namespace`/`job` template variables collapsed to a single `pod` selector,
   since this Prometheus never sets a `cluster` label on Alloy's series — same underlying gap as the
   kubernetes-mixin one above, just resolved per-dashboard here instead of left as a gap.
@@ -834,7 +839,7 @@ official upstream mixins (`grafana/loki`'s `loki-mixin`, `grafana/alloy`'s `allo
   business-level metrics either (no per-Promotion/Stage/Warehouse counters); only `controller`,
   `managementController`, and `webhooksServer` expose metrics, and only generic
   controller-runtime/workqueue/Go-runtime instrumentation (`api` and `garbageCollector` have no
-  metrics support in the chart at all). `apps/kargo/dashboards/kargo-controllers.json` covers
+  metrics support in the chart at all). `addons/kargo/dashboards/kargo-controllers.json` covers
   reconcile rate/errors/latency and workqueue depth/latency **per Kargo resource type** — the
   generic reconciler metrics' `controller` label is still set to the real resource name
   (`promotion`/`stage`/`warehouse`/`control_flow_stage`/`project`/...), so this is a genuine signal,

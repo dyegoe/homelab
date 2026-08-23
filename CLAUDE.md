@@ -54,11 +54,11 @@ README.md's `GitOps` section — that's the canonical reference. Summary for qui
 - `argocd/argocd.yaml` — ArgoCD manages its **own installation** (source: `argocd/install/`, which
   tracks the upstream `install.yaml` at a pinned tag via a Kustomize remote resource). Upgrading
   ArgoCD is a git change (bump the tag), never a manual `kubectl apply` again after bootstrap.
-- `argocd/apps.yaml` — the addon **App-of-Apps** (source: `argocd/apps/`, listing one `Application`
+- `argocd/addons.yaml` — the addon **App-of-Apps** (source: `argocd/addons/`, listing one `Application`
   per addon, e.g. `cilium.yaml`, `gateway-crds.yaml`). App-of-Apps, not ApplicationSet — this is a
   single 3-node cluster with a small, deliberate addon list, not a dynamic multi-cluster/
   multi-tenant fleet.
-- Addon Helm values live in `apps/<name>/helm/values.yaml` — real, standalone YAML, one `helm/`
+- Addon Helm values live in `addons/<name>/helm/values.yaml` — real, standalone YAML, one `helm/`
   subdirectory per app. This is **not** because inline `valuesObject` is undiffable — it's equally
   visible in `git diff`/PR review, since the `Application` object is itself git-tracked. The actual
   hard rule is never a wall of imperative `helm --set` flags, which get no diff at all (this was the
@@ -70,7 +70,7 @@ template`/`lint`/`diff` work directly against it) and review signal (a values ch
   Renovate's automated version-bump PRs (see `renovate.json`) produce a clean, reviewable diff.
   Extra plain manifests an addon needs
   beyond its Helm chart (e.g. Cilium's BGP/LoadBalancerIPPool/HTTPRoute config) go in a sibling
-  `apps/<name>/kustomization.yaml` (app-level, not under `helm/`), added as a third, non-`ref`
+  `addons/<name>/kustomization.yaml` (app-level, not under `helm/`), added as a third, non-`ref`
   source on the same `Application` — see `gateway-crds.yaml` for the same idea applied to a
   no-Helm-chart addon (sourced straight from the upstream repo's manifest directory).
 - **Adopting a resource already running from a manual `helm install`** (as Cilium was): leave
@@ -80,7 +80,7 @@ template`/`lint`/`diff` work directly against it) and review signal (a values ch
 - **Kargo** (not yet implemented): scoped to standalone applications hosted on this cluster (e.g. a
   personal website), each with its own `dev`/`prd` namespaces — a real Warehouse → Stage → Stage
   promotion chain with verification gates, which is what Kargo is actually built for. **Not** used
-  for the cluster addons in `argocd/apps/` — there's no dev/prd split for infra, and a git PR
+  for the cluster addons in `argocd/addons/` — there's no dev/prd split for infra, and a git PR
   already gives the same rendered-diff review Kargo's `hydrateTo` would add. Addon version bumps
   come via Renovate-opened PRs (see `renovate.json`) — don't wire addons into Kargo
   Warehouses/Stages.

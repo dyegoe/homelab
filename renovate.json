@@ -1,16 +1,24 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
+  "extends": [
+    "config:recommended"
+  ],
   "argocd": {
-    "managerFilePatterns": ["/^argocd/.+\\.ya?ml$/"]
+    "managerFilePatterns": [
+      "/^argocd/.+\\.ya?ml$/"
+    ]
   },
   "kubernetes": {
-    "managerFilePatterns": ["/^apps/.+/deployment.*\\.ya?ml$/"]
+    "managerFilePatterns": [
+      "/^addons/.+/deployment.*\\.ya?ml$/"
+    ]
   },
   "customManagers": [
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^argocd/install/kustomization\\.yaml$/"],
+      "managerFilePatterns": [
+        "/^argocd/install/kustomization\\.yaml$/"
+      ],
       "matchStrings": [
         "raw\\.githubusercontent\\.com/argoproj/argo-cd/(?<currentValue>v[0-9.]+)/manifests/install\\.yaml"
       ],

@@ -7,7 +7,7 @@ api:
   # httproute-kargo.yaml.
   host: kargo.nodes.ee
   tls:
-    # Cilium's central Gateway (apps/gateway) terminates TLS with the shared *.nodes.ee wildcard
+    # Cilium's central Gateway (addons/gateway) terminates TLS with the shared *.nodes.ee wildcard
     # cert, same as Grafana/Prometheus - the API server itself serves plain HTTP (Service port 80,
     # confirmed via `helm template`). terminatedUpstream still makes Kargo generate https:// URLs
     # even though its own listener is plain HTTP, since TLS is terminated upstream at the Gateway.
