@@ -1,0 +1,9 @@
+crds:
+  enabled: true
+config:
+  enableGatewayAPI: true
+prometheus:
+  enabled: true
+  servicemonitor:
+    enabled: true
+    interval: 30s

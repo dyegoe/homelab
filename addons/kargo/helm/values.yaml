@@ -1,0 +1,87 @@
+---
+# CRDs (Warehouse/Stage/Project/...) are bundled in this chart and installed as part of it -
+# unlike prometheus-operator-crds, nothing else in this cluster needs them to exist early, so no
+# separate CRD-only Application is needed here.
+api:
+  # Used for cert/OIDC-issuer/callback URL generation - must match the HTTPRoute hostname in
+  # httproute-kargo.yaml.
+  host: kargo.nodes.ee
+  tls:
+    # Cilium's central Gateway (apps/gateway) terminates TLS with the shared *.nodes.ee wildcard
+    # cert, same as Grafana/Prometheus - the API server itself serves plain HTTP (Service port 80,
+    # confirmed via `helm template`). terminatedUpstream still makes Kargo generate https:// URLs
+    # even though its own listener is plain HTTP, since TLS is terminated upstream at the Gateway.
+    enabled: false
+    terminatedUpstream: true
+  secret:
+    # References the Secret materialized by onepassword-kargo-admin.yaml (OnePasswordItem
+    # "kargo-admin") instead of inlining a password hash/signing key here. Must contain
+    # ADMIN_ACCOUNT_PASSWORD_HASH and ADMIN_ACCOUNT_TOKEN_SIGNING_KEY - see README.md's Kargo
+    # section for how those are generated and stored in 1Password.
+    name: kargo-admin
+  # Small, fixed-purpose control plane components - conservative limits consistent with every
+  # other addon's values.yaml on this 3-node/32GB-per-node hardware, not battle-tested yet (no
+  # Warehouses/Stages exist until the standalone website app is ready - see README.md).
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+controller:
+  # api and garbageCollector have no Prometheus metrics support in this chart at all - only
+  # controller/managementController/webhooksServer do. Selector-less Prometheus
+  # (serviceMonitorSelectorNilUsesHelmValues: false in kube-prometheus-stack's values.yaml) already
+  # picks up any ServiceMonitor cluster-wide, so no additionalLabels needed here.
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+garbageCollector:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+externalWebhooksServer:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+webhooksServer:
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+managementController:
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi

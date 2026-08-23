@@ -1,0 +1,6 @@
+[extend]
+  useDefault = true
+
+[allowlist]
+  description = "SealedSecret ciphertext - encrypted with the cluster's sealed-secrets controller public key, unusable without the controller's private key. Safe to commit; that's the point of SealedSecrets. Matched by this repo's own sealedsecret-*.yaml naming convention, not by path, so it survives the apps->addons rename and covers any future sealed secret."
+  paths       = ['''(^|/)sealedsecret-.*\.ya?ml$''']
