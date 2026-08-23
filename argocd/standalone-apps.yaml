@@ -1,0 +1,57 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: standalone-apps
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - app: website
+                  repoURL: https://github.com/dyegoe/website.git
+          - list:
+              elements:
+                - env: dev
+                - env: prd
+  template:
+    metadata:
+      name: "{{.app}}-{{.env}}"
+      annotations:
+        # Delegates argocd-update authority to Kargo's dev/prd Stage in this app's Project - see
+        # https://docs.kargo.io/user-guide/how-to-guides/argo-cd-integration
+        kargo.akuity.io/authorized-stage: "{{.app}}:{{.env}}"
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      sources:
+        - repoURL: "{{.repoURL}}"
+          targetRevision: main
+          path: "deploy/overlays/{{.env}}"
+        # Per-app-per-env plain manifests owned by this repo (e.g. the GHCR imagePullSecret) - same
+        # non-ref extra-source pattern used for addon plain manifests, see README's "Adding a new
+        # Application" section.
+        - repoURL: https://github.com/dyegoe/homelab.git
+          targetRevision: main
+          path: "standalone/{{.app}}/{{.env}}"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.app}}-{{.env}}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - ServerSideApply=true
+          - CreateNamespace=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
