@@ -17,6 +17,7 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
     - [Bootstrap (from zero)](#bootstrap-from-zero)
     - [Adding a new Application (the pattern)](#adding-a-new-application-the-pattern)
     - [Adopting existing (non-GitOps) resources](#adopting-existing-non-gitops-resources)
+    - [Standalone apps (ApplicationSet)](#standalone-apps-applicationset)
     - [Current Applications](#current-applications)
     - [Renovate](#renovate)
     - [Kargo](#kargo)
@@ -26,6 +27,7 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
   - [1Password Operator](#1password-operator)
     - [Installation](#installation)
     - [How to use](#how-to-use)
+    - [Creating a docker-registry (imagePullSecret) item](#creating-a-docker-registry-imagepullsecret-item)
     - [Migrating a bootstrap secret to 1Password](#migrating-a-bootstrap-secret-to-1password)
   - [Observability](#observability)
     - [Architecture](#architecture-1)
@@ -274,8 +276,13 @@ up, but no Warehouse/Stage/Project exists yet — that comes once a standalone a
 Principles:
 
 - **App-of-Apps** for the addon bundle (Cilium, observability, etc.) — a small, deliberate
-  list. Not ApplicationSet, which solves a different problem (dynamic multi-cluster/multi-tenant
-  fleets) this single-cluster homelab doesn't have.
+  list. Addons don't need an ApplicationSet generator: there's no per-addon matrix (no dev/prd,
+  no per-cluster variance) to expand, just a fixed list a human edits.
+- **ApplicationSet** (`argocd/apps.yaml`) for standalone hosted apps (e.g. the personal website) —
+  each app gets one `Application` per environment, generated from an `{app} x {env}` matrix. This
+  _is_ the dynamic-expansion case ApplicationSet is for: every app needs the same `dev`/`prd` shape,
+  and Kargo promotes Freight between the generated `Application`s — see
+  [Standalone apps (ApplicationSet)](#standalone-apps-applicationset) below.
 - Helm values live in `addons/<app>/helm/values.yaml` — real, standalone YAML — rather than inlined
   as `valuesObject` in the `Application` CRD. Both are equally visible in `git diff`/PR review,
   since the `Application` object is itself git-tracked; the actual hard requirement is **never** a
@@ -297,6 +304,7 @@ argocd/
 ├── install/
 │   └── kustomization.yaml   # tracks the upstream install.yaml (pinned tag) as a remote resource
 ├── addons.yaml               # Application: the addon App-of-Apps
+├── apps.yaml                 # ApplicationSet: generates one Application per app x env
 └── addons/
     ├── kustomization.yaml   # lists every addon Application
     ├── cilium.yaml          # Application: Cilium (multi-source: Helm chart + this repo's values)
@@ -306,6 +314,15 @@ addons/
 └── cilium/
     └── helm/
         └── values.yaml      # Cilium Helm values (source of truth, never inlined)
+
+apps/
+└── website/                 # one dir per standalone app, matching apps.yaml's `app` element
+    ├── dev/                 # per-app-per-env plain manifests (e.g. the GHCR imagePullSecret)
+    │   ├── kustomization.yaml
+    │   └── onepassword-ghcr-pull.yaml
+    └── prd/
+        ├── kustomization.yaml
+        └── onepassword-ghcr-pull.yaml
 ```
 
 Each addon gets an `addons/<app>/helm/values.yaml` — one `helm/` subdirectory per app. That leaves
@@ -314,15 +331,17 @@ plain manifests the addon needs beyond what the Helm chart renders, combined int
 `Application` as a third source (see [Adding a new Application](#adding-a-new-application-the-pattern)).
 
 There is no separate "root" `Application`. `argocd/kustomization.yaml` is applied directly, once,
-and produces two top-level, self-syncing Applications:
+and produces two top-level, self-syncing Applications plus one `ApplicationSet`:
 
-| Application | Sync wave | Source           | Purpose                                                     |
-| ----------- | --------- | ---------------- | ----------------------------------------------------------- |
-| `argocd`    | `-10`     | `argocd/install` | ArgoCD manages its own installation/upgrades                |
-| `addons`    | `-9`      | `argocd/addons`  | App-of-Apps: owns every addon `Application` (e.g. `cilium`) |
+| Resource                | Sync wave | Source                                | Purpose                                                                                                                                                            |
+| ----------------------- | --------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `argocd` (Application)  | `-10`     | `argocd/install`                      | ArgoCD manages its own installation/upgrades                                                                                                                       |
+| `addons` (Application)  | `-9`      | `argocd/addons`                       | App-of-Apps: owns every addon `Application` (e.g. `cilium`)                                                                                                        |
+| `apps` (ApplicationSet) | n/a       | `argocd/apps.yaml` (matrix generator) | Generates one `Application` per standalone app x env (e.g. `website-dev`, `website-prd`) — see [Standalone apps (ApplicationSet)](#standalone-apps-applicationset) |
 
-Both run with `syncPolicy.automated: {prune: true, selfHeal: true}` — once bootstrapped, upgrading
-ArgoCD or adding/changing an addon is a git commit, not a `kubectl`/`helm` command.
+All three run with `syncPolicy.automated: {prune: true, selfHeal: true}` — once bootstrapped,
+upgrading ArgoCD, adding/changing an addon, or adding a new standalone app is a git commit, not a
+`kubectl`/`helm` command.
 
 ### Bootstrap (from zero)
 
@@ -463,6 +482,36 @@ is empty or exactly what's expected — _before_ enabling `automated: {prune: tr
 in a follow-up commit. This is the guardrail that would have caught the incident that motivated
 this whole approach: a wrong Cilium value shipped via a raw `--set` flag and took an hour to
 diagnose, because nothing rendered a reviewable diff before it reached the cluster.
+
+### Standalone apps (ApplicationSet)
+
+`argocd/apps.yaml` is an `ApplicationSet` using a **matrix generator** that cross-joins two very
+different kinds of generator:
+
+- A `list` generator with two fixed elements, `env: dev` and `env: prd`. `env` is a platform
+  concept, not a per-app one — every app gets the same two environments, and a `list` generator can
+  only ever emit exactly these two values, so there's nothing to validate.
+- A Git **`files`** generator globbing `apps/*/config.json`. Each matching file becomes one set of
+  template parameters (`app`, `repoURL`), so apps are discovered from the repo tree instead of being
+  hardcoded in `apps.yaml` — adding an app never means editing this `ApplicationSet`.
+
+`matrix` produces one generated `Application` per `{app, env}` pair (`website-dev`, `website-prd`,
+...). Each gets two sources: the app's own repo (`deploy/overlays/{{.env}}`) and this repo's
+`apps/{{.app}}/{{.env}}` path for any plain manifests this repo owns on the app's behalf (currently
+just the GHCR `imagePullSecret` via the 1Password Operator — see
+[Creating a docker-registry (imagePullSecret) item](#creating-a-docker-registry-imagepullsecret-item)).
+`kargo.akuity.io/authorized-stage` on each generated `Application` delegates its sync authority to
+Kargo's matching `dev`/`prd` `Stage` (not yet created — see [Kargo](#kargo)).
+
+**Adding a new standalone app:**
+
+1. `apps/<app-name>/config.json` — `{"app": "<app-name>", "repoURL": "<app-repo-url>"}`. No `env`
+   key: that comes from the `list` generator's fixed pair, not from the app.
+2. `apps/<app-name>/dev/` and `apps/<app-name>/prd/` — a `kustomization.yaml` plus whatever plain
+   manifests that app needs per environment (mirror `apps/website/`).
+3. Commit and push — the Git generator picks up the new `config.json` on its next refresh and the
+   matrix expands it to `<app-name>-dev` and `<app-name>-prd` `Application`s automatically, no
+   `argocd/apps.yaml` edit and no new `Application` YAML to write by hand.
 
 ### Current Applications
 
@@ -682,6 +731,39 @@ metadata:
 ```
 
 For more information, refer to the [official documentation](https://developer.1password.com/docs/k8s/operator/).
+
+### Creating a docker-registry (imagePullSecret) item
+
+The Operator has no docker-registry-specific logic: it copies 1Password item field **labels**
+straight into the generated Secret's `data` keys, verbatim — the same generic mechanism as [How to
+use](#how-to-use) above. To get a working `kubernetes.io/dockerconfigjson` image pull secret out of
+it, two things have to line up:
+
+1. The `OnePasswordItem` needs a top-level `type: kubernetes.io/dockerconfigjson` (a real field on
+   the CRD, sibling of `metadata`/`spec` — not a `spec` field), which the Operator copies onto the
+   generated Secret's `type`. See `apps/website/dev/onepassword-ghcr-pull.yaml` for a real example.
+2. Kubernetes requires that Secret type to carry exactly one data key, `.dockerconfigjson`,
+   containing the full Docker config JSON. So the 1Password item itself needs a field **labeled
+   exactly `.dockerconfigjson`** (the leading dot is a valid Secret data-key character, so it's
+   preserved as-is) whose value is that JSON blob — not the individual username/password.
+
+Generate that JSON blob with `kubectl` (`--dry-run=client` never touches the cluster) and a PAT
+pulled straight from the same 1Password item, then paste the output into the `.dockerconfigjson`
+field on that item:
+
+```bash
+kubectl create secret docker-registry ghcr-pull \
+  --docker-server=ghcr.io \
+  --docker-username=$(op item get "homelab-gh-pat-argocd-website" --fields username) \
+  --docker-password=$(op item get "homelab-gh-pat-argocd-website" --fields password --reveal) \
+  --dry-run=client -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d
+```
+
+Kustomize/ArgoCD only ever render the `OnePasswordItem` pointer above — it carries no secret
+material. The real Secret is materialized afterward, in-cluster, when the Operator reconciles that
+CR against 1Password directly; there's no way for Kustomize itself to build a docker-registry Secret
+from a 1Password item (it has no 1Password awareness, and its generators only read literals/files
+already present in the repo at render time).
 
 ### Migrating a bootstrap secret to 1Password
 

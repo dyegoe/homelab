@@ -2,7 +2,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
-  name: standalone-apps
+  name: apps
   namespace: argocd
 spec:
   goTemplate: true
@@ -10,14 +10,21 @@ spec:
   generators:
     - matrix:
         generators:
-          - list:
-              elements:
-                - app: website
-                  repoURL: https://github.com/dyegoe/website.git
+          # Fixed dev/prd pair, not sourced from the repo - a list generator can only ever
+          # produce these two values, so every app gets exactly this env set with nothing to
+          # validate (see README's "Standalone apps (ApplicationSet)" section).
           - list:
               elements:
                 - env: dev
                 - env: prd
+          # One apps/<app>/config.json per standalone app - adding an app means adding a file
+          # here, not editing this ApplicationSet. matrix cross-joins each discovered app with
+          # both envs above to produce e.g. website-dev, website-prd.
+          - git:
+              repoURL: https://github.com/dyegoe/homelab.git
+              revision: main
+              files:
+                - path: "apps/*/config.json"
   template:
     metadata:
       name: "{{.app}}-{{.env}}"
@@ -38,7 +45,7 @@ spec:
         # Application" section.
         - repoURL: https://github.com/dyegoe/homelab.git
           targetRevision: main
-          path: "standalone/{{.app}}/{{.env}}"
+          path: "apps/{{.app}}/{{.env}}"
       destination:
         server: https://kubernetes.default.svc
         namespace: "{{.app}}-{{.env}}"

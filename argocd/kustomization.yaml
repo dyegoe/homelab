@@ -4,4 +4,4 @@ kind: Kustomization
 resources:
   - argocd.yaml
   - addons.yaml
-  - standalone-apps.yaml
+  - apps.yaml
