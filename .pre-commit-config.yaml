@@ -50,4 +50,4 @@ repos:
         additional_dependencies:
           - github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0
         pass_filenames: false
-        files: (kustomization\.yaml|apps/.*\.yaml|argocd/.*\.yaml)$
+        files: (kustomization\.yaml|addons/.*\.yaml|argocd/.*\.yaml)$

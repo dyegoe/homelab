@@ -12,7 +12,7 @@ crds:
 # etcd is a native Talos host service, not a Kubernetes pod, so it isn't scraped here.
 kubeEtcd:
   enabled: false
-# No kube-proxy on this cluster - Cilium runs in kube-proxy-less mode (see apps/cilium).
+# No kube-proxy on this cluster - Cilium runs in kube-proxy-less mode (see addons/cilium).
 kubeProxy:
   enabled: false
 # The previous split-chart stack on this same hardware (3 nodes, 4 cores/32GB each) shipped
