@@ -1,0 +1,294 @@
+{
+  "id": null,
+  "uid": "alloy-resources",
+  "title": "Alloy Resources",
+  "tags": [
+    "alloy",
+    "monitoring",
+    "prometheus"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "pod",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(alloy_build_info, pod)",
+        "query": "label_values(alloy_build_info, pod)",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "allValue": ".*",
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "options": []
+      }
+    ]
+  },
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "CPU usage of the Alloy process relative to 1 CPU core.\n\nFor example, 100% means using one entire CPU core.\n",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by(pod) (rate(alloy_resources_process_cpu_seconds_total{pod=~\"$pod\"}[$__rate_interval]))\n",
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "title": "CPU usage",
+      "type": "timeseries",
+      "id": 1
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Resident memory size of the Alloy process.\n",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decbytes"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by(pod) (alloy_resources_process_resident_memory_bytes{pod=~\"$pod\"})\n",
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "title": "Memory (RSS)",
+      "type": "timeseries",
+      "id": 2
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Rate at which the Alloy process performs garbage collections.\n",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "points",
+            "pointSize": 3
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by(pod) (\n  rate(go_gc_duration_seconds_count{pod=~\"$pod\"}[5m])\n  and on(instance)\n  alloy_build_info{pod=~\"$pod\"}\n)\n",
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "title": "Garbage collections",
+      "type": "timeseries",
+      "id": 3
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Number of goroutines which are running in parallel. An infinitely\ngrowing number of these indicates a goroutine leak.\n",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by(pod) (\n  go_goroutines{pod=~\"$pod\"}\n  and on(instance)\n  alloy_build_info{pod=~\"$pod\"}\n)\n",
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "title": "Goroutines",
+      "type": "timeseries",
+      "id": 4
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Heap memory currently in use by the Alloy process.\n",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decbytes"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by(pod) (\n  go_memstats_heap_inuse_bytes{pod=~\"$pod\"}\n  and on(instance)\n  alloy_build_info{pod=~\"$pod\"}\n)\n",
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "title": "Memory (heap in use)",
+      "type": "timeseries",
+      "id": 5
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Rate of data received across all network interfaces for the machine\nAlloy is running on.\n\nData shown here is across all running processes and not exclusive to\nthe running Alloy process.\n",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 30,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "Bps"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by(pod) (rate(alloy_resources_machine_rx_bytes_total{pod=~\"$pod\"}[$__rate_interval]))\n",
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "title": "Network receive bandwidth",
+      "type": "timeseries",
+      "id": 6
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Rate of data sent across all network interfaces for the machine\nAlloy is running on.\n\nData shown here is across all running processes and not exclusive to\nthe running Alloy process.\n",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 30,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "Bps"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by(pod) (rate(alloy_resources_machine_tx_bytes_total{pod=~\"$pod\"}[$__rate_interval]))\n",
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "title": "Network send bandwidth",
+      "type": "timeseries",
+      "id": 7
+    }
+  ]
+}

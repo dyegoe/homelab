@@ -1,0 +1,19 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - clusterissuer-letsencrypt-cloudflare-prod.yaml
+  - clusterissuer-letsencrypt-cloudflare-staging.yaml
+  - onepassword-cloudflare-api-token.yaml
+
+# Grafana's sidecar (searchNamespace: ALL) auto-discovers any ConfigMap labeled grafana_dashboard:
+# "1" in any namespace. Ported from the old homelab-gitops repo's dashboards.
+configMapGenerator:
+  - name: grafana-dashboard-cert-manager
+    files:
+      - dashboards/cert-manager.json
+
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    grafana_dashboard: "1"

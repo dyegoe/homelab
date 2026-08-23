@@ -1,0 +1,43 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: loki
+      targetRevision: 7.3.0
+      helm:
+        releaseName: loki
+        valueFiles:
+          - $values/addons/loki/helm/values.yaml
+    # Source to provide references for Helm values
+    - repoURL: https://github.com/dyegoe/homelab.git
+      targetRevision: main
+      ref: values
+    # Source to provide references for Kustomize bases
+    - repoURL: https://github.com/dyegoe/homelab.git
+      targetRevision: main
+      path: addons/loki
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

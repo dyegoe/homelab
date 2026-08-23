@@ -1,0 +1,17 @@
+---
+connect:
+  create: true
+  api:
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+  # Point to the credentials secret we created via SealedSecrets
+  credentialsName: onepassword-connect-credentials
+operator:
+  create: true
+  # Automatically restart apps when secrets change
+  autoRestart: true
+  # Point to the token secret we created via SealedSecrets
+  token:
+    name: onepassword-connect-token
+    key: token
