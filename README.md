@@ -754,8 +754,8 @@ field on that item:
 ```bash
 kubectl create secret docker-registry ghcr-pull \
   --docker-server=ghcr.io \
-  --docker-username=$(op item get "homelab-gh-pat-argocd-website" --fields username) \
-  --docker-password=$(op item get "homelab-gh-pat-argocd-website" --fields password --reveal) \
+  --docker-username=$(op item get "homelab-gh-pat-registry-ghcr" --fields username) \
+  --docker-password=$(op item get "homelab-gh-pat-registry-ghcr" --fields password --reveal) \
   --dry-run=client -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d
 ```
 
