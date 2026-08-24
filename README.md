@@ -278,11 +278,12 @@ Principles:
 - **App-of-Apps** for the addon bundle (Cilium, observability, etc.) — a small, deliberate
   list. Addons don't need an ApplicationSet generator: there's no per-addon matrix (no dev/prd,
   no per-cluster variance) to expand, just a fixed list a human edits.
-- **ApplicationSet** (`argocd/apps.yaml`) for standalone hosted apps (e.g. the personal website) —
-  each app gets one `Application` per environment, generated from an `{app} x {env}` matrix. This
-  _is_ the dynamic-expansion case ApplicationSet is for: every app needs the same `dev`/`prd` shape,
-  and Kargo promotes Freight between the generated `Application`s — see
-  [Standalone apps (ApplicationSet)](#standalone-apps-applicationset) below.
+- **ApplicationSet** (`argocd/apps-applicationset/applicationset.yaml`, kept in sync from git by
+  the `apps-applicationset` `Application` that wraps it — see the table below) for standalone
+  hosted apps (e.g. the personal website) — each app gets one `Application` per environment,
+  generated from an `{app} x {env}` matrix. This _is_ the dynamic-expansion case ApplicationSet is
+  for: every app needs the same `dev`/`prd` shape, and Kargo promotes Freight between the generated
+  `Application`s — see [Standalone apps (ApplicationSet)](#standalone-apps-applicationset) below.
 - Helm values live in `addons/<app>/helm/values.yaml` — real, standalone YAML — rather than inlined
   as `valuesObject` in the `Application` CRD. Both are equally visible in `git diff`/PR review,
   since the `Application` object is itself git-tracked; the actual hard requirement is **never** a
@@ -304,7 +305,10 @@ argocd/
 ├── install/
 │   └── kustomization.yaml   # tracks the upstream install.yaml (pinned tag) as a remote resource
 ├── addons.yaml               # Application: the addon App-of-Apps
-├── apps.yaml                 # ApplicationSet: generates one Application per app x env
+├── apps-applicationset.yaml  # Application: self-syncs apps-applicationset/ below
+├── apps-applicationset/
+│   ├── kustomization.yaml
+│   └── applicationset.yaml  # ApplicationSet: generates one Application per app x env
 └── addons/
     ├── kustomization.yaml   # lists every addon Application
     ├── cilium.yaml          # Application: Cilium (multi-source: Helm chart + this repo's values)
@@ -316,13 +320,8 @@ addons/
         └── values.yaml      # Cilium Helm values (source of truth, never inlined)
 
 apps/
-└── website/                 # one dir per standalone app, matching apps.yaml's `app` element
-    ├── dev/                 # per-app-per-env plain manifests (e.g. the GHCR imagePullSecret)
-    │   ├── kustomization.yaml
-    │   └── onepassword-ghcr-pull.yaml
-    └── prd/
-        ├── kustomization.yaml
-        └── onepassword-ghcr-pull.yaml
+└── website/                 # one dir per standalone app, matching the ApplicationSet's `app` element
+    └── config.json           # {"app": "website", "repoURL": "..."} - discovered by the git generator
 ```
 
 Each addon gets an `addons/<app>/helm/values.yaml` — one `helm/` subdirectory per app. That leaves
@@ -331,17 +330,28 @@ plain manifests the addon needs beyond what the Helm chart renders, combined int
 `Application` as a third source (see [Adding a new Application](#adding-a-new-application-the-pattern)).
 
 There is no separate "root" `Application`. `argocd/kustomization.yaml` is applied directly, once,
-and produces two top-level, self-syncing Applications plus one `ApplicationSet`:
+and produces three top-level, self-syncing `Application`s:
 
-| Resource                | Sync wave | Source                                | Purpose                                                                                                                                                            |
-| ----------------------- | --------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `argocd` (Application)  | `-10`     | `argocd/install`                      | ArgoCD manages its own installation/upgrades                                                                                                                       |
-| `addons` (Application)  | `-9`      | `argocd/addons`                       | App-of-Apps: owns every addon `Application` (e.g. `cilium`)                                                                                                        |
-| `apps` (ApplicationSet) | n/a       | `argocd/apps.yaml` (matrix generator) | Generates one `Application` per standalone app x env (e.g. `website-dev`, `website-prd`) — see [Standalone apps (ApplicationSet)](#standalone-apps-applicationset) |
+| Resource                            | Sync wave | Source                       | Purpose                                                                                                                                                                                         |
+| ----------------------------------- | --------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `argocd` (Application)              | `-10`     | `argocd/install`             | ArgoCD manages its own installation/upgrades                                                                                                                                                    |
+| `addons` (Application)              | `-9`      | `argocd/addons`              | App-of-Apps: owns every addon `Application` (e.g. `cilium`)                                                                                                                                     |
+| `apps-applicationset` (Application) | `-9`      | `argocd/apps-applicationset` | Self-syncs the `apps` `ApplicationSet` object itself, so edits to its matrix/template (not just new `apps/*/config.json` files) reconcile from git without a manual `kubectl apply` — see below |
 
 All three run with `syncPolicy.automated: {prune: true, selfHeal: true}` — once bootstrapped,
-upgrading ArgoCD, adding/changing an addon, or adding a new standalone app is a git commit, not a
-`kubectl`/`helm` command.
+upgrading ArgoCD, adding/changing an addon, or changing how standalone apps are generated is a git
+commit, not a `kubectl`/`helm` command.
+
+`apps-applicationset` in turn manages one `ApplicationSet` named `apps`
+(`argocd/apps-applicationset/applicationset.yaml`), which generates one `Application` per
+standalone app x env (e.g. `website-dev`, `website-prd`) — see
+[Standalone apps (ApplicationSet)](#standalone-apps-applicationset) below. This wrapper exists
+because the `ApplicationSet`'s **git generator** only refreshes the _parameters_ it iterates over
+(new `apps/*/config.json` files) — the generator polls GitHub on its own. The `ApplicationSet`'s
+own template/spec is a separate concern: it's whatever was last applied to the live object, so
+without `apps-applicationset` wrapping it, changing the template itself (its `sources`,
+`destination`, `syncPolicy`, etc.) would silently do nothing until someone thought to re-run
+`kubectl apply -k argocd/ --server-side` by hand.
 
 ### Bootstrap (from zero)
 
@@ -393,7 +403,7 @@ kubectl -n argocd port-forward svc/argocd-server 8080:443
 kubectl apply -k argocd/ --server-side
 ```
 
-This applies the two top-level `Application` objects described above. From this point on:
+This applies the three top-level `Application` objects described above. From this point on:
 
 - **Never re-run the imperative `install.yaml` apply again.** Upgrading ArgoCD is done by bumping
   the pinned tag in `argocd/install/kustomization.yaml` and pushing.
@@ -485,33 +495,36 @@ diagnose, because nothing rendered a reviewable diff before it reached the clust
 
 ### Standalone apps (ApplicationSet)
 
-`argocd/apps.yaml` is an `ApplicationSet` using a **matrix generator** that cross-joins two very
-different kinds of generator:
+`argocd/apps-applicationset/applicationset.yaml` is an `ApplicationSet` named `apps`, using a
+**matrix generator** that cross-joins two very different kinds of generator:
 
 - A `list` generator with two fixed elements, `env: dev` and `env: prd`. `env` is a platform
   concept, not a per-app one — every app gets the same two environments, and a `list` generator can
   only ever emit exactly these two values, so there's nothing to validate.
 - A Git **`files`** generator globbing `apps/*/config.json`. Each matching file becomes one set of
   template parameters (`app`, `repoURL`), so apps are discovered from the repo tree instead of being
-  hardcoded in `apps.yaml` — adding an app never means editing this `ApplicationSet`.
+  hardcoded in the `ApplicationSet` — adding an app never means editing it.
 
 `matrix` produces one generated `Application` per `{app, env}` pair (`website-dev`, `website-prd`,
-...). Each gets two sources: the app's own repo (`deploy/overlays/{{.env}}`) and this repo's
-`apps/{{.app}}/{{.env}}` path for any plain manifests this repo owns on the app's behalf (currently
-just the GHCR `imagePullSecret` via the 1Password Operator — see
-[Creating a docker-registry (imagePullSecret) item](#creating-a-docker-registry-imagepullsecret-item)).
-`kargo.akuity.io/authorized-stage` on each generated `Application` delegates its sync authority to
-Kargo's matching `dev`/`prd` `Stage` (not yet created — see [Kargo](#kargo)).
+...), sourced entirely from the app's own repo (`deploy/overlays/{{.env}}`) — this repo owns no
+plain manifests on the app's behalf. `kargo.akuity.io/authorized-stage` on each generated
+`Application` delegates its sync authority to Kargo's matching `dev`/`prd` `Stage` (not yet
+created — see [Kargo](#kargo)).
+
+The `ApplicationSet` object itself is kept in sync from git by the self-syncing
+`apps-applicationset` `Application` (source: `argocd/apps-applicationset/`) — see the table in
+[Architecture](#architecture) above. Without that wrapper, editing this `ApplicationSet`'s
+generators/template would require a manual `kubectl apply -k argocd/ --server-side` to take
+effect, since the git generator only refreshes the _parameters_ it iterates over, not the
+`ApplicationSet`'s own spec.
 
 **Adding a new standalone app:**
 
 1. `apps/<app-name>/config.json` — `{"app": "<app-name>", "repoURL": "<app-repo-url>"}`. No `env`
    key: that comes from the `list` generator's fixed pair, not from the app.
-2. `apps/<app-name>/dev/` and `apps/<app-name>/prd/` — a `kustomization.yaml` plus whatever plain
-   manifests that app needs per environment (mirror `apps/website/`).
-3. Commit and push — the Git generator picks up the new `config.json` on its next refresh and the
+2. Commit and push — the Git generator picks up the new `config.json` on its next refresh and the
    matrix expands it to `<app-name>-dev` and `<app-name>-prd` `Application`s automatically, no
-   `argocd/apps.yaml` edit and no new `Application` YAML to write by hand.
+   `ApplicationSet` edit and no new `Application` YAML to write by hand.
 
 ### Current Applications
 
@@ -519,6 +532,7 @@ Kargo's matching `dev`/`prd` `Stage` (not yet created — see [Kargo](#kargo)).
 | ------------------------------- | --------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `argocd`                        | `-10`     | yes       | Self-managed ArgoCD install                                                                                                                                                      |
 | `addons`                        | `-9`      | yes       | App-of-Apps parent                                                                                                                                                               |
+| `apps-applicationset`           | `-9`      | yes       | Self-syncs the `apps` `ApplicationSet` object — see [Standalone apps (ApplicationSet)](#standalone-apps-applicationset)                                                          |
 | `gateway-crds`                  | `-8`      | yes       | Gateway API CRDs, sourced directly from `kubernetes-sigs/gateway-api`'s `config/crd/experimental` path                                                                           |
 | `snapshot-crds`                 | `-8`      | yes       | CSI volume snapshot CRDs                                                                                                                                                         |
 | `prometheus-operator-crds`      | `-8`      | yes       | Prometheus Operator CRDs only, split from `kube-prometheus-stack` so every other addon's `ServiceMonitor` renders regardless of sync order (see [Observability](#observability)) |
