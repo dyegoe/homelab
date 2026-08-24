@@ -40,12 +40,6 @@ spec:
         - repoURL: "{{.repoURL}}"
           targetRevision: main
           path: "deploy/overlays/{{.env}}"
-        # Per-app-per-env plain manifests owned by this repo (e.g. the GHCR imagePullSecret) - same
-        # non-ref extra-source pattern used for addon plain manifests, see README's "Adding a new
-        # Application" section.
-        - repoURL: https://github.com/dyegoe/homelab.git
-          targetRevision: main
-          path: "apps/{{.app}}/{{.env}}"
       destination:
         server: https://kubernetes.default.svc
         namespace: "{{.app}}-{{.env}}"
