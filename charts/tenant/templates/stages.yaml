@@ -40,6 +40,9 @@ spec:
             path: ./src/deploy/overlays/{{ $env }}
             images:
               - image: ${{ "{{ vars.imageURL }}" }}
+                # quote() is load-bearing, not stylistic: a bare-semver tag like "0.1" is valid YAML
+                # float syntax, so without quote() Kargo hands this step a JSON number instead of a
+                # string and it fails with "images.0.tag: Invalid type. Expected: string, given: number".
                 tag: ${{ "{{ quote(imageFrom(vars.imageURL).Tag) }}" }}
         - uses: git-commit
           config:
@@ -54,5 +57,12 @@ spec:
             apps:
               - name: {{ $.Values.appName }}-{{ $env }}
                 sources:
+                  # No desiredRevision here, deliberately: dev and prd both push to the same `main`
+                  # branch (different overlay paths, so no conflicts). Setting desiredRevision (e.g.
+                  # ${{ "{{ outputs.push.commit }}" }}) registers a Stage health check pinned to that
+                  # exact commit — a promotion to the OTHER stage then advances `main` out from under
+                  # it and flips this Stage Unhealthy until it next promotes. An empty/unset
+                  # desiredRevision is a no-op for that check (verified against Kargo v1.11.2 source).
+                  # Don't add it back without giving dev/prd separate branches first.
                   - repoURL: ${{ "{{ vars.repoURL }}" }}
 {{- end }}

@@ -9,6 +9,10 @@ spec:
   subscriptions:
     - image:
         repoURL: {{ .Values.imageURL }}
+        # SemVer (not NewestBuild): NewestBuild is timestamp-based and semver-blind, so when a CI
+        # pipeline pushes multiple tags on the same digest (e.g. "main", "sha-<sha>", "0.3.0" all
+        # pointing at one build), it can arbitrarily pick a non-release tag. strictSemvers +
+        # allowTagsRegexes narrow discovery to only a bare X.Y.Z release tag, ignoring the rest.
         imageSelectionStrategy: SemVer
         discoveryLimit: 5
         strictSemvers: true

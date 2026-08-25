@@ -7,11 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This repo sets up a homelab Kubernetes cluster running on Talos Linux. The cluster itself was
 bootstrapped manually (see README.md note on the pre-GitOps bootstrap process). GitOps via ArgoCD
 is live — ArgoCD manages its own installation plus an addon App-of-Apps (see "GitOps architecture"
-below and README.md's `GitOps` section for the full runbook). [Kargo](https://kargo.io/) is planned
-but not yet implemented, scoped to standalone applications this cluster will host (e.g. a personal
-website with `dev`/`prd` namespaces) where it does real multi-environment promotion — not the
-cluster addons, which have no dev/prd split and get automated version-bump PRs from
-[Renovate](https://docs.renovatebot.com/) (see `renovate.json`).
+below and README.md's `GitOps` section for the full runbook). [Kargo](https://kargo.io/) is live too,
+scoped to standalone applications this cluster hosts (the personal website is the first, and the
+reference example — see README.md's `Kargo` section) where it does real multi-environment
+promotion — not the cluster addons, which have no dev/prd split and get automated version-bump PRs
+from [Renovate](https://docs.renovatebot.com/) (see `renovate.json`).
 
 ## Architecture
 
@@ -77,12 +77,15 @@ template`/`lint`/`diff` work directly against it) and review signal (a values ch
   `syncPolicy.automated` off on first commit, sync once manually, confirm the diff is clean, only
   then enable `automated: {prune: true, selfHeal: true}` in a follow-up commit.
 - Everything lives in this same repo — no separate `homelab-gitops` repo.
-- **Kargo** (not yet implemented): scoped to standalone applications hosted on this cluster (e.g. a
-  personal website), each with its own `dev`/`prd` namespaces — a real Warehouse → Stage → Stage
-  promotion chain with verification gates, which is what Kargo is actually built for. **Not** used
-  for the cluster addons in `argocd/addons/` — there's no dev/prd split for infra, and a git PR
-  already gives the same rendered-diff review Kargo's `hydrateTo` would add. Addon version bumps
-  come via Renovate-opened PRs (see `renovate.json`) — don't wire addons into Kargo
+- **Kargo**: scoped to standalone applications hosted on this cluster, each with its own `dev`/`prd`
+  namespaces — a real Warehouse → Stage → Stage promotion chain with verification gates, which is
+  what Kargo is actually built for. Provisioned per app via the reusable `charts/tenant` Helm chart
+  (one `apps/<name>/config.json` per app); the website app (`apps/website/`) is live end-to-end and
+  is the reference example — see README.md's `Kargo` section for the add-a-new-app steps and the
+  accumulated gotchas (numeric-looking tags, shared-branch health checks, image tag selection).
+  **Not** used for the cluster addons in `argocd/addons/` — there's no dev/prd split for infra, and
+  a git PR already gives the same rendered-diff review Kargo's `hydrateTo` would add. Addon version
+  bumps come via Renovate-opened PRs (see `renovate.json`) — don't wire addons into Kargo
   Warehouses/Stages.
 
 ## Tooling

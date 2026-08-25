@@ -21,6 +21,7 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
     - [Current Applications](#current-applications)
     - [Renovate](#renovate)
     - [Kargo](#kargo)
+    - [Adding a new standalone app via Kargo](#adding-a-new-standalone-app-via-kargo)
     - [Rotating the ArgoCD repo credential](#rotating-the-argocd-repo-credential)
   - [Advanced Networking](#advanced-networking)
     - [Mikrotik BGP configuration](#mikrotik-bgp-configuration)
@@ -270,8 +271,9 @@ For BGP configuration, refer to the [Advanced Networking](#advanced-networking) 
 This cluster is managed via [ArgoCD](https://argo-cd.readthedocs.io/), including its own
 installation — ArgoCD manages itself. [Kargo](https://kargo.io/) is installed on top of this for
 multi-environment promotion of standalone applications hosted here (e.g. a personal website with
-`dev`/`prd` namespaces) — not for the cluster addons below; see [Kargo](#kargo). The platform is
-up, but no Warehouse/Stage/Project exists yet — that comes once a standalone app needs it.
+`dev`/`prd` namespaces) — not for the cluster addons below; see [Kargo](#kargo). The website app is
+live end-to-end (Warehouse → `dev` auto-promotion → manual `prd` promotion) and is the reference
+example for adding further standalone apps.
 
 Principles:
 
@@ -508,8 +510,8 @@ diagnose, because nothing rendered a reviewable diff before it reached the clust
 `matrix` produces one generated `Application` per `{app, env}` pair (`website-dev`, `website-prd`,
 ...), sourced entirely from the app's own repo (`deploy/overlays/{{.env}}`) — this repo owns no
 plain manifests on the app's behalf. `kargo.akuity.io/authorized-stage` on each generated
-`Application` delegates its sync authority to Kargo's matching `dev`/`prd` `Stage` (not yet
-created — see [Kargo](#kargo)).
+`Application` delegates its sync authority to Kargo's matching `dev`/`prd` `Stage`, provisioned by
+`charts/tenant` — see [Kargo](#kargo).
 
 The `ApplicationSet` object itself is kept in sync from git by the self-syncing
 `apps-applicationset` `Application` (source: `argocd/apps-applicationset/`) — see the table in
@@ -549,7 +551,7 @@ effect, since the git generator only refreshes the _parameters_ it iterates over
 | `kube-prometheus-stack`         | `-1`      | yes       | After `longhorn` - Prometheus/Grafana persistence needs a working storage class                                                                                                  |
 | `loki`                          | `-1`      | yes       | Same storage dependency as above                                                                                                                                                 |
 | `alloy`                         | `0`       | yes       | Log shipping - pods via the Kubernetes API, Talos's own logs via a LoadBalancer Service                                                                                          |
-| `kargo`                         | `1`       | yes       | Platform only - no Warehouse/Stage/Project yet, see [Kargo](#kargo)                                                                                                              |
+| `kargo`                         | `1`       | yes       | Platform, plus one live app (website) provisioned via `charts/tenant` — see [Kargo](#kargo)                                                                                      |
 
 ### Renovate
 
@@ -575,11 +577,15 @@ review and merge by hand, same as the manual bumps this replaces.
 ### Kargo
 
 The platform itself is installed as an addon (`argocd/addons/kargo.yaml`, sync-wave `1` — after
-`onepassword`, `cert-manager`, and `gateway`, which it depends on); no Warehouse/Stage/Project
-exists yet. Scope once the standalone website app is ready (built in a separate session): each such
-app — starting with the personal website — gets a `dev` and `prd` namespace/Stage. A Warehouse
-watches the app's image (or chart) source, Freight flows through a `dev` Stage, gets verified, then
-promotes to `prd` via Kargo's `hydrateTo` + review-branch rendered-manifest diff. This is genuine
+`onepassword`, `cert-manager`, and `gateway`, which it depends on). Each standalone app hosted on
+this cluster gets a `dev` and `prd` namespace/Stage, provisioned from the reusable `charts/tenant`
+Helm chart (see [Adding a new standalone app via Kargo](#adding-a-new-standalone-app-via-kargo)
+below) — the personal website (`apps/website/`) is the first app and the reference example, live
+end-to-end as of 2026-08-25. A Warehouse watches the app's image tags, Freight flows through a `dev`
+Stage automatically, then a deliberate, manual approval (Kargo dashboard or `kargo promote`)
+promotes the same Freight to `prd`. Promotion itself is a direct git commit + push to the app repo's
+`main` (a `kustomize-set-image` step rewriting `deploy/overlays/{dev,prd}/kustomization.yaml`,
+followed by an ArgoCD sync trigger) — not `hydrateTo`/a review-branch PR flow. This is genuine
 multi-environment promotion, since each app actually has separate dev/prd environments to promote
 between.
 
@@ -588,6 +594,69 @@ split for infra, so there's nothing to promote between; a chart-version bump the
 reviewable diff via a normal git PR, which is the same thing Kargo's rendered-manifest review would
 add. Addon version bumps are automated via [Renovate](#renovate) instead, which opens that same
 kind of reviewable PR.
+
+### Adding a new standalone app via Kargo
+
+`charts/tenant` is the reusable Helm chart — it creates the app's Kargo `Project`/`ProjectConfig`,
+its `dev`/`prd` `Warehouse`/`Stage`s, the `kargo-repo-auth`/`kargo-image-auth` `OnePasswordItem`s,
+and (mirroring what `apps-applicationset` would otherwise generate per app — see
+[Standalone apps (ApplicationSet)](#standalone-apps-applicationset)) the `<app>-dev`/`<app>-prd`
+ArgoCD `Application`s themselves. `apps/website/` is the reference instance; treat it as the example
+to copy.
+
+**In this repo:**
+
+1. `apps/<app-name>/config.json` — `appName`, `repoURL`, `imageURL`, and `onepassword.gitItemPath`
+   (+ `imageItemPath` if the image registry is private). See `charts/tenant/values.schema.json` for
+   the full shape and `apps/website/config.json` for a real example.
+2. Create the two 1Password items the config references (git read/write credential for Kargo's
+   promotion commits, and image-registry pull credential if private) — same 1Password-operator
+   pattern as everywhere else in this repo, see [1Password Operator](#1password-operator).
+3. Commit and push — `charts/tenant` (surfaced the same way as any other app-of-apps child) picks it
+   up and provisions everything above.
+
+**In the app's own repo** (see `dyegoe/website`'s `deploy/README.md` and `RELEASING.md` for the
+fully-worked example):
+
+1. `deploy/base/` (Deployment/Service/whatever the app needs) + `deploy/overlays/{dev,prd}/`
+   (Kustomize overlays — Kargo's promotion step rewrites each overlay's `kustomization.yaml`
+   `images:` block, so don't hand-maintain comments/formatting there, they won't survive).
+2. A release pipeline that publishes a **bare-semver image tag** (e.g. `0.3.0`, no `v` prefix, no
+   other characters) on every real release — see the Warehouse gotcha below for why the tag shape
+   matters. Conventional Commits + commitizen (as `dyegoe/website` does) is one way to get this for
+   free; any pipeline that produces a clean semver tag works.
+3. **Scope that pipeline's build trigger away from `deploy/overlays/**`.** Kargo's own promotion
+   commits land on the same `main` branch the app's CI watches — without a path filter excluding
+   `deploy/overlays/**`, every promotion commit triggers a new build → new image → new promotion,
+   forever. This happened for real building the website app (2026-08-25) — see `ci.yaml`'s `paths:`
+   filter there for the fix.
+
+**Gotchas accumulated building the website app** — read before touching `charts/tenant/templates/`:
+
+- **Numeric-looking image tags need `quote()`.** `stages.yaml`'s `kustomize-set-image` step sets
+  `tag: ${{ quote(imageFrom(vars.imageURL).Tag) }}`, not a bare `${{ imageFrom(...).Tag }}`. A tag
+  like `0.1` is valid YAML float syntax — without `quote()`, Kargo's expression engine hands the
+  `kustomize-set-image` step a JSON number instead of a string, and it fails with
+  `images.0.tag: Invalid type. Expected: string, given: number`.
+- **`argocd-update`'s `desiredRevision` is intentionally omitted** from `stages.yaml`'s promotion
+  steps. Setting it (e.g. `${{ outputs.push.commit }}`) registers a Stage health check that requires
+  the app's ArgoCD `Application` to be observably synced to that _exact_ commit. Since `dev` and
+  `prd` both write to the _same_ `main` branch (in their own distinct overlay paths, so no merge
+  conflicts — just a shared ref), a promotion to either Stage advances `main` out from under the
+  other Stage's already-recorded exact-commit expectation, flipping it `Unhealthy` until it next
+  promotes. Leaving `desiredRevision` unset makes the health check a no-op (an empty desired
+  revision is skipped, confirmed against Kargo `v1.11.2` source — the docs text about it being
+  "determined by Freight" doesn't hold for a git-write-back promotion like this one). Don't add it
+  back without first giving `dev`/`prd` separate branches or otherwise decoupling what each
+  `Application`'s `targetRevision` tracks.
+- **Warehouse image selection: `SemVer`, not `NewestBuild`.** `NewestBuild` picks whichever tag the
+  registry lists first for the newest-pushed digest, with no preference for a semver tag over a
+  `main`/`sha-<sha>` CI tag sharing the same digest — it was effectively arbitrary which tag won.
+  `warehouse.yaml` uses `imageSelectionStrategy: SemVer` with `strictSemvers: true` and
+  `allowTagsRegexes: ["^\d+\.\d+\.\d+$"]` so only a bare `X.Y.Z` release tag is ever considered.
+- **CI publishing multiple tags per image is fine** (e.g. `main`, `sha-<sha>`, and the semver tag all
+  on the same digest, as `dyegoe/website`'s `ci.yaml` does) as long as the Warehouse's
+  `allowTagsRegexes` excludes everything but the one you want Kargo to track.
 
 **Chart:** `oci://ghcr.io/akuity/kargo-charts/kargo`, pinned in `argocd/addons/kargo.yaml`. CRDs
 (`Warehouse`/`Stage`/`Project`/...) are bundled in the chart itself — unlike
