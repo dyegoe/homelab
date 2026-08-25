@@ -40,7 +40,7 @@ spec:
             path: ./src/deploy/overlays/{{ $env }}
             images:
               - image: ${{ "{{ vars.imageURL }}" }}
-                tag: "${{ "{{ imageFrom(vars.imageURL).Tag }}" }}"
+                tag: ${{ "{{ quote(imageFrom(vars.imageURL).Tag) }}" }}
         - uses: git-commit
           config:
             path: ./src
