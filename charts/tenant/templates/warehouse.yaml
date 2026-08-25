@@ -11,4 +11,6 @@ spec:
         repoURL: {{ .Values.imageURL }}
         imageSelectionStrategy: SemVer
         discoveryLimit: 5
-        strictSemvers: false
+        strictSemvers: true
+        allowTagsRegexes:
+          - "^\\d+\\.\\d+\\.\\d+$"
