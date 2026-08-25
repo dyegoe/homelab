@@ -42,7 +42,7 @@ spec:
           selfHeal: true
         syncOptions:
           - ServerSideApply=true
-          - CreateNamespace=true
+          - CreateNamespace=false # We don't want ArgoCD to create the namespace, as Kargo will manage it as part of Project.
         retry:
           limit: 5
           backoff:
