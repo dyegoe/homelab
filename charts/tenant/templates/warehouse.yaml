@@ -9,6 +9,6 @@ spec:
   subscriptions:
     - image:
         repoURL: {{ .Values.imageURL }}
-        imageSelectionStrategy: NewestBuild
+        imageSelectionStrategy: SemVer
         discoveryLimit: 5
         strictSemvers: false
