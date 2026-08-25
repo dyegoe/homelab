@@ -11,3 +11,4 @@ spec:
         repoURL: {{ .Values.imageURL }}
         imageSelectionStrategy: NewestBuild
         discoveryLimit: 5
+        strictSemvers: false
