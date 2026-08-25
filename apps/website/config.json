@@ -1,4 +1,9 @@
 {
-  "app": "website",
-  "repoURL": "https://github.com/dyegoe/website.git"
+  "appName": "website",
+  "repoURL": "https://github.com/dyegoe/website.git",
+  "imageURL": "ghcr.io/dyegoe/website",
+  "onepassword": {
+    "gitItemPath": "vaults/Kubernetes/items/homelab-gh-pat-kargo-website",
+    "imageItemPath": "vaults/Kubernetes/items/homelab-gh-pat-registry-ghcr"
+  }
 }

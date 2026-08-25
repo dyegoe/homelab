@@ -2,8 +2,9 @@
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata:
-  name: repo-gh-dyegoe-website
+  name: kargo-repo-auth
+  namespace: {{ .Values.appName }}
   labels:
     kargo.akuity.io/cred-type: git
 spec:
-  itemPath: "vaults/Kubernetes/items/homelab-gh-pat-kargo-website"
+  itemPath: {{ .Values.onepassword.gitItemPath }}

@@ -1,0 +1,12 @@
+{{- if .Values.onepassword.imageItemPath }}
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: kargo-image-auth
+  namespace: {{ .Values.appName }}
+  labels:
+    kargo.akuity.io/cred-type: image
+spec:
+  itemPath: {{ .Values.onepassword.imageItemPath }}
+{{- end }}

@@ -8,41 +8,34 @@ spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
   generators:
-    - matrix:
-        generators:
-          # Fixed dev/prd pair, not sourced from the repo - a list generator can only ever
-          # produce these two values, so every app gets exactly this env set with nothing to
-          # validate (see README's "Standalone apps (ApplicationSet)" section).
-          - list:
-              elements:
-                - env: dev
-                - env: prd
-          # One apps/<app>/config.json per standalone app - adding an app means adding a file
-          # here, not editing this ApplicationSet. matrix cross-joins each discovered app with
-          # both envs above to produce e.g. website-dev, website-prd.
-          - git:
-              repoURL: https://github.com/dyegoe/homelab.git
-              revision: main
-              files:
-                - path: "apps/*/config.json"
+    - git:
+        repoURL: https://github.com/dyegoe/homelab.git
+        revision: main
+        files:
+          - path: apps/*/config.json
   template:
     metadata:
-      name: "{{.app}}-{{.env}}"
-      annotations:
-        # Delegates argocd-update authority to Kargo's dev/prd Stage in this app's Project - see
-        # https://docs.kargo.io/user-guide/how-to-guides/argo-cd-integration
-        kargo.akuity.io/authorized-stage: "{{.app}}:{{.env}}"
+      name: "{{.appName}}"
       finalizers:
         - resources-finalizer.argocd.argoproj.io
     spec:
       project: default
-      sources:
-        - repoURL: "{{.repoURL}}"
-          targetRevision: main
-          path: "deploy/overlays/{{.env}}"
+      source:
+        repoURL: https://github.com/dyegoe/homelab.git
+        path: charts/tenant
+        targetRevision: main
+        helm:
+          releaseName: "{{.appName}}"
+          valuesObject:
+            appName: "{{.appName}}"
+            repoURL: "{{.repoURL}}"
+            imageURL: "{{.imageURL}}"
+            onepassword:
+              gitItemPath: "{{.onepassword.gitItemPath}}"
+              imageItemPath: "{{ if index .onepassword `imageItemPath` }}{{ index .onepassword `imageItemPath` }}{{ end }}"
       destination:
         server: https://kubernetes.default.svc
-        namespace: "{{.app}}-{{.env}}"
+        namespace: "{{.appName}}"
       syncPolicy:
         automated:
           prune: true

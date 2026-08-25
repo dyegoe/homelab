@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "appName": {
+      "type": "string",
+      "description": "The name of the application (must be a valid DNS-1123 label, as it is used as a Kubernetes namespace name)",
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "minLength": 1,
+      "maxLength": 63
+    },
+    "repoURL": {
+      "type": "string",
+      "description": "The Git repository URL for the application (e.g. https://github.com/dyegoe/sample-app). Accepts https:// or, though deprecated by Kargo, ssh:// and SCP-style (git@host:path) URLs",
+      "pattern": "(?:^(ssh|https?)://(?:([\\w-]+)(:(.+))?@)?([\\w-]+(?:\\.[\\w-]+)*)(?::(\\d{1,5}))?(/.*)$)|(?:^([\\w-]+)@([\\w+]+(?:\\.[\\w-]+)*):(/?.*))"
+    },
+    "imageURL": {
+      "type": "string",
+      "description": "The container image repository (registry/path, no scheme like http(s):// or oci://, and no tag/digest)",
+      "pattern": "^(?:[a-z0-9]+(?:[.-][a-z0-9]+)*(?::[0-9]+)?/)?[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$"
+    },
+    "interval": {
+      "type": "string",
+      "description": "The Warehouse's reconciliation interval (e.g. 5m0s, 1h). Defaults to 5m0s when unset",
+      "pattern": "^([0-9]+(\\.[0-9]+)?(s|m|h))+$"
+    },
+    "onepassword": {
+      "type": "object",
+      "properties": {
+        "gitItemPath": {
+          "type": "string",
+          "description": "The path to the 1Password item containing the application's Git repository credentials to be used by Kargo. 1Password item must have the following fields: 'username', 'password', and 'repoURL'"
+        },
+        "imageItemPath": {
+          "type": "string",
+          "description": "The path to the 1Password item containing the application's container image credentials if the image is private. 1Password item must have the following fields: 'username', 'password', and 'repoURL'"
+        }
+      },
+      "required": [
+        "gitItemPath"
+      ]
+    }
+  },
+  "required": [
+    "appName",
+    "repoURL",
+    "imageURL",
+    "onepassword"
+  ]
+}

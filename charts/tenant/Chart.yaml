@@ -1,0 +1,5 @@
+---
+apiVersion: v2
+name: tenant
+description: A Helm chart to create a platform tenant. It creates two ArgoCD applications (one per environment dev/prd), and Kargo configurations.
+version: 0.1.0

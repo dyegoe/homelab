@@ -10,11 +10,17 @@ repos:
       - id: mixed-line-ending
       - id: check-case-conflict
       - id: check-yaml
+        exclude: ^charts/.+/templates/.*\.ya?ml$
 
+  # Helm chart templates (charts/*/templates/*.yaml) are Go-template source, not plain YAML -
+  # they're rendered to text before ever being parsed as YAML, so unquoted {{ }} is expected to
+  # look like invalid YAML to a raw parser. `helm lint`/`helm template` are what actually validate
+  # them (see charts/tenant); check-yaml/yamllint are scoped to real YAML/JSON only.
   - repo: https://github.com/adrienverge/yamllint
     rev: v1.38.0
     hooks:
       - id: yamllint
+        exclude: ^charts/.+/templates/.*\.ya?ml$
 
   # The original pre-commit/mirrors-prettier is archived/unmaintained - this is the current
   # community-maintained successor. Scoped to markdown only so it doesn't compete with yamllint.

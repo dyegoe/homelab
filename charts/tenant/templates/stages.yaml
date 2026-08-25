@@ -1,0 +1,59 @@
+{{- range $env := list "dev" "prd" }}
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: {{ $env }}
+  namespace: {{ $.Values.appName }}
+spec:
+  # Dev accepts newly discovered Freight directly from the Warehouse, while
+  # prd accepts only Freight promoted by dev. This keeps prd from deploying
+  # an image before it has passed through dev and establishes the promotion
+  # chain between the two environments.
+  requestedFreight:
+    - origin:
+        kind: Warehouse
+        name: {{ $.Values.appName }}
+      sources:
+        {{- if eq $env "dev" }}
+        direct: true
+        {{- else }}
+        stages: ["dev"]
+        {{- end }}
+  promotionTemplate:
+    spec:
+      vars:
+        - name: repoURL
+          value: {{ $.Values.repoURL }}
+        - name: imageURL
+          value: {{ $.Values.imageURL }}
+      steps:
+        - uses: git-clone
+          config:
+            repoURL: ${{ "{{ vars.repoURL }}" }}
+            checkout:
+              - branch: main
+                path: ./src
+        - uses: kustomize-set-image
+          as: update-image
+          config:
+            path: ./src/deploy/overlays/{{ $env }}
+            images:
+              - image: ${{ "{{ vars.imageURL }}" }}
+                tag: ${{ "{{ imageFrom(vars.imageURL).Tag }}" }}
+        - uses: git-commit
+          config:
+            path: ./src
+            message: ${{ "{{ outputs['update-image'].commitMessage }}" }}
+        - uses: git-push
+          as: push
+          config:
+            path: ./src
+        - uses: argocd-update
+          config:
+            apps:
+              - name: {{ $.Values.appName }}-{{ $env }}
+                sources:
+                  - repoURL: ${{ "{{ vars.repoURL }}" }}
+                    desiredRevision: ${{ "{{ outputs.push.commit }}" }}
+{{- end }}

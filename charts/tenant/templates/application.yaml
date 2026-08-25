@@ -1,0 +1,36 @@
+{{- range $env := list "dev" "prd" }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ $.Values.appName }}-{{ $env }}
+  namespace: argocd
+  annotations:
+    # Delegates argocd-update authority to Kargo's dev/prd Stage in this app's Project - see
+    # https://docs.kargo.io/user-guide/how-to-guides/argo-cd-integration
+    kargo.akuity.io/authorized-stage: "{{ $.Values.appName }}:{{ $env }}"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: {{ $.Values.repoURL }}
+      targetRevision: main
+      path: deploy/overlays/{{ $env }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ $.Values.appName }}-{{ $env }}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+{{- end }}
