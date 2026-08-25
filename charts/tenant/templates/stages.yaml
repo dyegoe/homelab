@@ -55,5 +55,4 @@ spec:
               - name: {{ $.Values.appName }}-{{ $env }}
                 sources:
                   - repoURL: ${{ "{{ vars.repoURL }}" }}
-                    desiredRevision: ${{ "{{ outputs.push.commit }}" }}
 {{- end }}
