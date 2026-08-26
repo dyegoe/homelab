@@ -24,7 +24,8 @@ spec:
       kind: Namespace
     - group: kargo.akuity.io
       kind: Project
-  # Derived from what's actually synced into website/website-dev/website-prd today (verified live).
+  # Derived from what's actually synced under this project today (verified live, including the
+  # argocd namespace itself, not just the app's own namespaces — see argoproj.io/Application below).
   # kargo.akuity.io is whitelisted broadly since that's this project's whole domain (Warehouse/Stage/
   # ProjectConfig, and Kargo's own runtime Freight/Promotion objects) — everything else is a specific
   # kind, not a wildcard, since app-level workload kinds are the actual thing worth restricting.
@@ -34,6 +35,12 @@ spec:
   # Adding a new workload kind here is expected to be a normal follow-up PR alongside the app change
   # that needs it, same as any other reviewable diff in this repo.
   namespaceResourceWhitelist:
+    # argoproj.io/Application: the outer per-app Application (source: charts/tenant) is itself an
+    # App-of-Apps — charts/tenant/templates/application.yaml renders the <appName>-dev/-prd
+    # Application objects (in the argocd namespace) as part of its own sync, so this project must
+    # permit that resource kind for its own children, not just for the app's workload namespaces.
+    - group: argoproj.io
+      kind: Application
     - group: ''
       kind: ConfigMap
     - group: ''
