@@ -17,4 +17,4 @@ spec:
         discoveryLimit: 5
         strictSemvers: true
         allowTagsRegexes:
-          - "^\\d+\\.\\d+\\.\\d+$"
+          - "^v?\\d+\\.\\d+\\.\\d+$"

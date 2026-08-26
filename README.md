@@ -638,10 +638,10 @@ fully-worked example):
 1. `deploy/base/` (Deployment/Service/whatever the app needs) + `deploy/overlays/{dev,prd}/`
    (Kustomize overlays — Kargo's promotion step rewrites each overlay's `kustomization.yaml`
    `images:` block, so don't hand-maintain comments/formatting there, they won't survive).
-2. A release pipeline that publishes a **bare-semver image tag** (e.g. `0.3.0`, no `v` prefix, no
-   other characters) on every real release — see the Warehouse gotcha below for why the tag shape
-   matters. Conventional Commits + commitizen (as `dyegoe/website` does) is one way to get this for
-   free; any pipeline that produces a clean semver tag works.
+2. A release pipeline that publishes a **semver image tag**, optionally `v`-prefixed (e.g. `0.3.0`
+   or `v0.3.0`), no other characters, on every real release — see the Warehouse gotcha below for
+   why the tag shape matters. Conventional Commits + commitizen (as `dyegoe/website` does) is one
+   way to get this for free; any pipeline that produces a clean semver tag works.
 3. **Scope that pipeline's build trigger away from `deploy/overlays/**`.** Kargo's own promotion
    commits land on the same `main` branch the app's CI watches — without a path filter excluding
    `deploy/overlays/**`, every promotion commit triggers a new build → new image → new promotion,
@@ -670,7 +670,9 @@ fully-worked example):
   registry lists first for the newest-pushed digest, with no preference for a semver tag over a
   `main`/`sha-<sha>` CI tag sharing the same digest — it was effectively arbitrary which tag won.
   `warehouse.yaml` uses `imageSelectionStrategy: SemVer` with `strictSemvers: true` and
-  `allowTagsRegexes: ["^\d+\.\d+\.\d+$"]` so only a bare `X.Y.Z` release tag is ever considered.
+  `allowTagsRegexes: ["^v?\d+\.\d+\.\d+$"]` so only a release tag (`X.Y.Z`, optionally `v`-prefixed)
+  is ever considered. Kargo's underlying semver library treats the `v` prefix as optional, so
+  `strictSemvers` applies the same either way — no special-casing needed per app.
 - **CI publishing multiple tags per image is fine** (e.g. `main`, `sha-<sha>`, and the semver tag all
   on the same digest, as `dyegoe/website`'s `ci.yaml` does) as long as the Warehouse's
   `allowTagsRegexes` excludes everything but the one you want Kargo to track.
