@@ -9,7 +9,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: default
+  project: addons
   source:
     repoURL: https://prometheus-community.github.io/helm-charts
     chart: prometheus-operator-crds

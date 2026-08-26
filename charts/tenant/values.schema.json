@@ -24,6 +24,10 @@
       "description": "The Warehouse's reconciliation interval (e.g. 5m0s, 1h). Defaults to 5m0s when unset",
       "pattern": "^([0-9]+(\\.[0-9]+)?(s|m|h))+$"
     },
+    "argocdProject": {
+      "type": "string",
+      "description": "The ArgoCD AppProject these Applications belong to. Defaults to 'apps' when unset"
+    },
     "onepassword": {
       "type": "object",
       "properties": {

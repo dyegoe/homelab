@@ -13,7 +13,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: default
+  project: addons
   sources:
     - repoURL: ghcr.io/akuity/kargo-charts
       chart: kargo

@@ -9,7 +9,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: default
+  project: addons
   source:
     repoURL: https://github.com/kubernetes-csi/external-snapshotter
     path: client/config/crd

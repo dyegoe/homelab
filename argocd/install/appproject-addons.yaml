@@ -1,0 +1,19 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: addons
+  namespace: argocd
+spec:
+  description: Cluster infrastructure addons (App-of-Apps under argocd/addons/) — no dev/prd split, version bumps via Renovate.
+  sourceRepos:
+    - '*'
+  destinations:
+    - server: '*'
+      namespace: '*'
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'

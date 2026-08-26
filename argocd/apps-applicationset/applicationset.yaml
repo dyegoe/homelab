@@ -19,7 +19,7 @@ spec:
       finalizers:
         - resources-finalizer.argocd.argoproj.io
     spec:
-      project: default
+      project: "{{ if index . `argocdProject` }}{{ index . `argocdProject` }}{{ else }}apps{{ end }}"
       source:
         repoURL: https://github.com/dyegoe/homelab.git
         path: charts/tenant
@@ -30,6 +30,7 @@ spec:
             appName: "{{.appName}}"
             repoURL: "{{.repoURL}}"
             imageURL: "{{.imageURL}}"
+            argocdProject: "{{ if index . `argocdProject` }}{{ index . `argocdProject` }}{{ end }}"
             onepassword:
               gitItemPath: "{{.onepassword.gitItemPath}}"
               imageItemPath: "{{ if index .onepassword `imageItemPath` }}{{ index .onepassword `imageItemPath` }}{{ end }}"

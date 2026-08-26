@@ -9,7 +9,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: default
+  project: addons
   sources:
     - repoURL: https://grafana.github.io/helm-charts
       chart: alloy

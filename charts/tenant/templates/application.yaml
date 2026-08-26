@@ -12,7 +12,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: default
+  project: {{ $.Values.argocdProject | default "apps" }}
   sources:
     - repoURL: {{ $.Values.repoURL }}
       targetRevision: main

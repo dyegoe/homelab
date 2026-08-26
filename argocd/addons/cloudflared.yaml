@@ -9,7 +9,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: default
+  project: addons
   source:
     repoURL: https://github.com/dyegoe/homelab.git
     path: addons/cloudflared
