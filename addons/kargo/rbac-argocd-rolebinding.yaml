@@ -1,0 +1,17 @@
+---
+# Binds the kargo-controller ServiceAccount (namespace: kargo) to the namespace-scoped Role in the
+# sibling rbac-argocd-role.yaml - see that file for why this replaces the chart's own cluster-wide
+# ClusterRole/ClusterRoleBinding.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kargo-controller-argocd
+  namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kargo-controller-argocd
+subjects:
+  - kind: ServiceAccount
+    name: kargo-controller
+    namespace: kargo

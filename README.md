@@ -674,6 +674,24 @@ fully-worked example):
 - **CI publishing multiple tags per image is fine** (e.g. `main`, `sha-<sha>`, and the semver tag all
   on the same digest, as `dyegoe/website`'s `ci.yaml` does) as long as the Warehouse's
   `allowTagsRegexes` excludes everything but the one you want Kargo to track.
+- **The `kargo.akuity.io/authorized-stage` annotation (`charts/tenant/templates/application.yaml`)
+  is not Kubernetes RBAC** — it's a check Kargo's own controller code makes in-process before
+  patching an ArgoCD `Application`, layered on top of whatever raw RBAC the `kargo-controller`
+  ServiceAccount holds (see [Kargo's ArgoCD integration
+  docs](https://docs.kargo.io/user-guide/how-to-guides/argo-cd-integration)). The chart's own
+  `kargo-controller-argocd` `ClusterRole`/`ClusterRoleBinding` grants `get/list/patch/watch` on
+  `argoproj.io/Application` **cluster-wide** — every namespace, not just the ones under the `apps`
+  `AppProject`. `addons/kargo/helm/values.yaml` sets `argocd.dataPlane.kargoController.install:
+false` to suppress that, and `addons/kargo/rbac-argocd-role.yaml` /
+  `rbac-argocd-rolebinding.yaml` grant the same verbs via a namespace-scoped `Role`/`RoleBinding`
+  instead — every `Application` in this cluster lives in the
+  `argocd` namespace today, so this cuts the blast radius from cluster-wide down to that one
+  namespace with no per-app maintenance going forward. Native Kubernetes RBAC still can't scope
+  this down to just the `apps` `AppProject`'s `Application`s (only exact `resourceNames`, which
+  would mean editing this `Role` on every new app onboarding — the same tradeoff already rejected
+  for the `apps` `AppProject`'s `sourceRepos`, see [Architecture](#architecture)); the
+  `authorized-stage` annotation remains the real, Kargo-internal enforcement of which Stage may
+  touch which `Application`.
 
 **Chart:** `oci://ghcr.io/akuity/kargo-charts/kargo`, pinned in `argocd/addons/kargo.yaml`. CRDs
 (`Warehouse`/`Stage`/`Project`/...) are bundled in the chart itself — unlike

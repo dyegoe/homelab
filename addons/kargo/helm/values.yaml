@@ -2,6 +2,17 @@
 # CRDs (Warehouse/Stage/Project/...) are bundled in this chart and installed as part of it -
 # unlike prometheus-operator-crds, nothing else in this cluster needs them to exist early, so no
 # separate CRD-only Application is needed here.
+argocd:
+  dataPlane:
+    kargoController:
+      # Suppresses the chart's own kargo-controller-argocd ClusterRole/ClusterRoleBinding, which
+      # grants get/list/patch/watch on argoproj.io/Application CLUSTER-WIDE (every namespace, not
+      # just this cluster's argocd namespace where every Application actually lives). Replaced by
+      # a namespace-scoped Role/RoleBinding in rbac-argocd-role.yaml/rbac-argocd-rolebinding.yaml
+      # (this addon's plain-manifest kustomize source) granting the same verbs, same
+      # ServiceAccount, scoped to the argocd namespace only. controller.argocd.integrationEnabled (chart default: true) is unaffected -
+      # this only changes which manifest grants the RBAC, not whether the integration runs.
+      install: false
 api:
   # Used for cert/OIDC-issuer/callback URL generation - must match the HTTPRoute hostname in
   # httproute-kargo.yaml.
