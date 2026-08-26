@@ -305,7 +305,9 @@ argocd/
 ├── kustomization.yaml       # flat list of top-level Applications, applied once to bootstrap
 ├── argocd.yaml              # Application: ArgoCD's own installation (self-managed)
 ├── install/
-│   └── kustomization.yaml   # tracks the upstream install.yaml (pinned tag) as a remote resource
+│   ├── kustomization.yaml      # tracks the upstream install.yaml (pinned tag) as a remote resource
+│   ├── appproject-addons.yaml  # AppProject: addons (wildcard-permissive by design)
+│   └── appproject-apps.yaml    # AppProject: apps (least-privilege resource whitelist)
 ├── addons.yaml               # Application: the addon App-of-Apps
 ├── apps-applicationset.yaml  # Application: self-syncs apps-applicationset/ below
 ├── apps-applicationset/
@@ -330,6 +332,18 @@ Each addon gets an `addons/<app>/helm/values.yaml` — one `helm/` subdirectory 
 room for a sibling `addons/<app>/kustomization.yaml` (app-level, not under `helm/`) for any extra
 plain manifests the addon needs beyond what the Helm chart renders, combined into the same
 `Application` as a third source (see [Adding a new Application](#adding-a-new-application-the-pattern)).
+
+Two `AppProject`s (`argocd/install/appproject-addons.yaml`, `argocd/install/appproject-apps.yaml`,
+synced as part of ArgoCD's own self-managed install) separate cluster infra from tenant workloads:
+
+| AppProject | Used by                                                                                                                  | Scope                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `addons`   | every `Application` under `argocd/addons/`                                                                               | Wildcard-permissive (`sourceRepos`/`destinations`/resource whitelists all `'*'`) — deliberate: addons legitimately need broad CRD/cluster access and pull from a dozen+ external chart repos, so restricting `sourceRepos` would buy little for real maintenance cost.                                                                                                                          |
+| `apps`     | the `apps` `ApplicationSet`'s generated `Application`s, and `charts/tenant`'s own `<app>-dev`/`<app>-prd` `Application`s | Least-privilege: `sourceRepos` stays `'*'` (one repo per app — enumerating would fight the data-driven `config.json` flow; the real protection boundary is each app's own Kargo git-write credential), but `destinations`/`clusterResourceWhitelist`/`namespaceResourceWhitelist` are a real allowlist, derived from what's actually synced and verified against the live cluster, not guessed. |
+
+`argocd`, `addons`, and `apps-applicationset` (the three top-level Applications in the table below)
+deliberately stay on the built-in `default` project — they're foundational bootstrap scaffolding,
+not an addon or a tenant app themselves.
 
 There is no separate "root" `Application`. `argocd/kustomization.yaml` is applied directly, once,
 and produces three top-level, self-syncing `Application`s:
@@ -430,7 +444,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io # cascade-delete on Application deletion
 spec:
-  project: default
+  project: addons
   sources:
     - repoURL: <helm-repo-or-oci-url>
       chart: <chart-name>
@@ -601,14 +615,17 @@ kind of reviewable PR.
 its `dev`/`prd` `Warehouse`/`Stage`s, the `kargo-repo-auth`/`kargo-image-auth` `OnePasswordItem`s,
 and (mirroring what `apps-applicationset` would otherwise generate per app — see
 [Standalone apps (ApplicationSet)](#standalone-apps-applicationset)) the `<app>-dev`/`<app>-prd`
-ArgoCD `Application`s themselves. `apps/website/` is the reference instance; treat it as the example
+ArgoCD `Application`s themselves — all governed by the `apps` `AppProject` by default (see
+[Architecture](#architecture)). `apps/website/` is the reference instance; treat it as the example
 to copy.
 
 **In this repo:**
 
 1. `apps/<app-name>/config.json` — `appName`, `repoURL`, `imageURL`, and `onepassword.gitItemPath`
-   (+ `imageItemPath` if the image registry is private). See `charts/tenant/values.schema.json` for
-   the full shape and `apps/website/config.json` for a real example.
+   (+ `imageItemPath` if the image registry is private, and `argocdProject` if this app should land
+   in an ArgoCD `AppProject` other than `apps` — see [Architecture](#architecture)). See
+   `charts/tenant/values.schema.json` for the full shape and `apps/website/config.json` for a real
+   example.
 2. Create the two 1Password items the config references (git read/write credential for Kargo's
    promotion commits, and image-registry pull credential if private) — same 1Password-operator
    pattern as everywhere else in this repo, see [1Password Operator](#1password-operator).
