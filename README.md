@@ -674,6 +674,26 @@ fully-worked example):
 - **CI publishing multiple tags per image is fine** (e.g. `main`, `sha-<sha>`, and the semver tag all
   on the same digest, as `dyegoe/website`'s `ci.yaml` does) as long as the Warehouse's
   `allowTagsRegexes` excludes everything but the one you want Kargo to track.
+- **The `kargo.akuity.io/authorized-stage` annotation (`charts/tenant/templates/application.yaml`)
+  is not Kubernetes RBAC** — it's a check Kargo's own controller code makes in-process before
+  patching an ArgoCD `Application`, layered on top of whatever raw RBAC the `kargo-controller`
+  ServiceAccount holds (see [Kargo's ArgoCD integration
+  docs](https://docs.kargo.io/user-guide/how-to-guides/argo-cd-integration)). By default the
+  chart's `kargo-controller-argocd` `ClusterRole`/`ClusterRoleBinding` grants
+  `get/list/patch/watch` on `argoproj.io/Application` **cluster-wide** because the controller's
+  Application cache watches every namespace by default (`cache.Options{}` in
+  `cmd/controlplane/controller.go`). `addons/kargo/helm/values.yaml` sets
+  `controller.argocd.watchArgocdNamespaceOnly: true`, which switches that cache to
+  `DefaultNamespaces: {argocd: {}}` — a genuinely namespaced watch — and the chart automatically
+  swaps in a namespace-scoped `Role`/`RoleBinding` (`charts/kargo/templates/argocd/role.yaml`) in
+  place of the `ClusterRole`. **A hand-written namespaced `Role` alone does NOT work** without this
+  flag: Kubernetes RBAC can never authorize a cluster-scoped `LIST`/`WATCH` call via any `Role`, no
+  matter the `RoleBinding` — this exact mistake broke the `website` `dev` promotion for freight
+  `0.6.0` on 2026-08-26 (the `argocd-update` step's `client.Get()` blocked on a cache that could
+  never finish its initial sync, timing out after 5m). The chart's own doc note on this flag
+  ("should usually be left false") is about older Argo CD versions / Applications living outside
+  Argo CD's own namespace — every `Application` in this cluster lives in the `argocd` namespace by
+  design (see [Architecture](#architecture)), so that caveat doesn't apply here.
 
 **Chart:** `oci://ghcr.io/akuity/kargo-charts/kargo`, pinned in `argocd/addons/kargo.yaml`. CRDs
 (`Warehouse`/`Stage`/`Project`/...) are bundled in the chart itself — unlike

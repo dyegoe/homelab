@@ -30,6 +30,24 @@ api:
       cpu: 200m
       memory: 256Mi
 controller:
+  argocd:
+    # Default (false) makes the controller's Application cache watch cluster-wide, which requires
+    # a cluster-wide ClusterRole/ClusterRoleBinding - get/list/patch/watch on argoproj.io/Application
+    # in every namespace, not just the ones under the apps AppProject. Setting this true switches
+    # the controller-runtime cache to cache.Options.DefaultNamespaces = {argocd: {}} (see
+    # cmd/controlplane/controller.go in kargo's source, v1.11.2), which makes it issue a
+    # NAMESPACED watch instead of a cluster-scoped one - the chart then renders a namespace-scoped
+    # Role/RoleBinding instead of the ClusterRole/ClusterRoleBinding (same gate in
+    # charts/kargo/templates/argocd/role.yaml and controller/cluster-roles.yaml). This is the
+    # chart's own supported mechanism for narrowing that RBAC, not a hand-rolled one - a namespaced
+    # Role alone (without this flag) cannot satisfy a cluster-scoped watch call under any binding,
+    # which is exactly what broke the website:dev promotion on 2026-08-26 (argocd-update step
+    # timed out - the client.Get() call blocks on the cache's initial sync, which never completes
+    # if the watch is Forbidden). The chart's own doc note ("should usually be left false") is
+    # about older Argo CD versions / Applications living outside Argo CD's own namespace - every
+    # Application in this cluster lives in the argocd namespace by design (see Architecture in
+    # README.md), so that caveat doesn't apply here.
+    watchArgocdNamespaceOnly: true
   # api and garbageCollector have no Prometheus metrics support in this chart at all - only
   # controller/managementController/webhooksServer do. Selector-less Prometheus
   # (serviceMonitorSelectorNilUsesHelmValues: false in kube-prometheus-stack's values.yaml) already
