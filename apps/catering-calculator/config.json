@@ -1,0 +1,9 @@
+{
+  "appName": "catering-calculator",
+  "repoURL": "https://github.com/dyegoe/catering-calculator.git",
+  "imageURL": "ghcr.io/dyegoe/catering-calculator",
+  "onepassword": {
+    "gitItemPath": "vaults/Kubernetes/items/homelab-gh-pat-kargo-catering-calculator",
+    "imageItemPath": "vaults/Kubernetes/items/homelab-gh-pat-registry-ghcr"
+  }
+}
