@@ -23,6 +23,7 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
     - [Kargo](#kargo)
     - [Adding a new standalone app via Kargo](#adding-a-new-standalone-app-via-kargo)
     - [Rotating the ArgoCD repo credential](#rotating-the-argocd-repo-credential)
+    - [Forcing an immediate refresh (GitHub webhook)](#forcing-an-immediate-refresh-github-webhook)
   - [Advanced Networking](#advanced-networking)
     - [Mikrotik BGP configuration](#mikrotik-bgp-configuration)
   - [1Password Operator](#1password-operator)
@@ -777,6 +778,55 @@ kubectl -n argocd patch secret repo-homelab \
   --type=merge \
   -p "{\"stringData\":{\"password\":\"$(op item get 'homelab-gh-pat-argocd-homelab' --fields password --reveal)\"}}"
 ```
+
+### Forcing an immediate refresh (GitHub webhook)
+
+Both the `apps` `ApplicationSet`'s git generator (`argocd/apps-applicationset/applicationset.yaml`,
+globbing `apps/*/config.json`) and ArgoCD's normal `Application` polling only notice a repo change
+on the controller's default poll interval (~3 min). Rather than wait on that, ArgoCD accepts a
+GitHub push webhook at `/api/webhook` that triggers an immediate refresh for any
+`Application`/`ApplicationSet` whose `repoURL` matches the payload — without exposing the rest of
+ArgoCD: the UI stays reachable only via the internal `argocd.nodes.ee` route
+([Bootstrap](#bootstrap-from-zero)), never tunneled to the internet.
+
+**Cloudflare Tunnel (manual, dashboard-only — not tracked in git):** in the Cloudflare Zero Trust
+dashboard, on the existing homelab tunnel (`addons/cloudflared`), add a new **Public Hostname**:
+
+- Hostname: `maya.nodes.ee`
+- Path: `/api/webhook`
+- Service: `http://argocd-server.argocd.svc.cluster.local:80`
+
+This targets the `argocd-server` Service directly, bypassing the internal Gateway/HTTPRoute
+entirely — any other path requested on `maya.nodes.ee` falls through to the tunnel's catch-all and
+never reaches ArgoCD.
+
+**Webhook secret** — lives only in the live `argocd-secret` (key `webhook.github.secret`), never in
+git. Unlike the guest password's bcrypt hash in `patch-secret-argocd-secret.yaml` (safe to commit —
+one-way hash), this is a live plaintext value used to verify GitHub's HMAC signature, so it's
+patched directly, the same category as ArgoCD's own admin password/signing key which also never
+appear in the repo:
+
+```bash
+WEBHOOK_SECRET=$(openssl rand -hex 20)
+kubectl -n argocd patch secret argocd-secret \
+  --type merge \
+  -p "{\"stringData\":{\"webhook.github.secret\":\"$WEBHOOK_SECRET\"}}"
+echo "$WEBHOOK_SECRET"   # copy for the GitHub webhook config below — not saved anywhere else
+```
+
+ArgoCD's settings manager watches `argocd-secret` and picks this up live, no restart required. If
+it ever needs re-establishing (secret rotated, cluster rebuilt), just repeat this step with a new
+value and update the GitHub webhook's secret to match.
+
+**GitHub webhook** (repo → Settings → Webhooks → Add webhook):
+
+- Payload URL: `https://maya.nodes.ee/api/webhook`
+- Content type: `application/json`
+- Secret: the value generated above
+- Events: "Just the push event"
+
+**Verify:** push a change to `apps/*/config.json` (or any tracked path) and confirm the
+corresponding `Application`/`ApplicationSet` reconciles within seconds instead of minutes.
 
 ## Advanced Networking
 
