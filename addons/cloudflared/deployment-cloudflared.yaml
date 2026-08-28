@@ -4,8 +4,7 @@ kind: Deployment
 metadata:
   name: cloudflared
   annotations:
-    operator.1password.io/item-path: "vaults/Kubernetes/items/homelab-cloudflared-tunnel-token"
-    operator.1password.io/item-name: "homelab-cloudflared-tunnel-token"
+    reloader.stakater.com/auto: "true"
 spec:
   replicas: 2
   revisionHistoryLimit: 1
