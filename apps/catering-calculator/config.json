@@ -4,7 +4,7 @@
   "imageURL": "ghcr.io/dyegoe/catering-calculator",
   "onepassword": {
     "gitItemPath": "vaults/Kubernetes/items/homelab-gh-pat-kargo-catering-calculator",
-    "imageItemPath": "vaults/Kubernetes/items/homelab-gh-pat-registry-ghcr",
+    "imageItemPath": "vaults/Kubernetes/items/homelab-gh-pat-registry-ghcr-catering-calculator",
     "argocdRepoItemPath": "vaults/Kubernetes/items/homelab-gh-pat-argocd-catering-calculator"
   }
 }

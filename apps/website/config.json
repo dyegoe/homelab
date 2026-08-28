@@ -4,7 +4,7 @@
   "imageURL": "ghcr.io/dyegoe/website",
   "onepassword": {
     "gitItemPath": "vaults/Kubernetes/items/homelab-gh-pat-kargo-website",
-    "imageItemPath": "vaults/Kubernetes/items/homelab-gh-pat-registry-ghcr",
+    "imageItemPath": "vaults/Kubernetes/items/homelab-gh-pat-registry-ghcr-website",
     "argocdRepoItemPath": "vaults/Kubernetes/items/homelab-gh-pat-argocd-website"
   }
 }
