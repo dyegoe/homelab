@@ -160,7 +160,7 @@ grafana:
   admin:
     existingSecret: grafana-admin-password
     userKey: username
-    passwordKey: confirmNew
+    passwordKey: password
   resources:
     requests:
       cpu: 100m
