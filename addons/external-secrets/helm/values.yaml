@@ -1,0 +1,6 @@
+---
+serviceMonitor:
+  enabled: true
+  interval: 30s
+grafanaDashboard:
+  enabled: true
