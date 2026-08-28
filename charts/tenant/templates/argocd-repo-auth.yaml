@@ -1,0 +1,12 @@
+{{- if .Values.onepassword.argocdRepoItemPath }}
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: repo-gh-dyegoe-{{ .Values.appName }}
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+spec:
+  itemPath: {{ .Values.onepassword.argocdRepoItemPath }}
+{{- end }}

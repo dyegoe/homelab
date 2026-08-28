@@ -614,7 +614,8 @@ kind of reviewable PR.
 
 `charts/tenant` is the reusable Helm chart — it creates the app's Kargo `Project`/`ProjectConfig`,
 its `dev`/`prd` `Warehouse`/`Stage`s, the `kargo-repo-auth`/`kargo-image-auth` `OnePasswordItem`s,
-and (mirroring what `apps-applicationset` would otherwise generate per app — see
+an `argocd-repo-auth` `OnePasswordItem` if the app's own repo is private, and (mirroring what
+`apps-applicationset` would otherwise generate per app — see
 [Standalone apps (ApplicationSet)](#standalone-apps-applicationset)) the `<app>-dev`/`<app>-prd`
 ArgoCD `Application`s themselves — all governed by the `apps` `AppProject` by default (see
 [Architecture](#architecture)). `apps/website/` is the reference instance; treat it as the example
@@ -623,15 +624,24 @@ to copy.
 **In this repo:**
 
 1. `apps/<app-name>/config.json` — `appName`, `repoURL`, `imageURL`, and `onepassword.gitItemPath`
-   (+ `imageItemPath` if the image registry is private, and `argocdProject` if this app should land
-   in an ArgoCD `AppProject` other than `apps` — see [Architecture](#architecture)). See
-   `charts/tenant/values.schema.json` for the full shape and `apps/website/config.json` for a real
-   example.
-2. Create the two 1Password items the config references (git read/write credential for Kargo's
-   promotion commits, and image-registry pull credential if private) — same 1Password-operator
-   pattern as everywhere else in this repo, see [1Password Operator](#1password-operator).
+   (+ `imageItemPath` if the image registry is private, `argocdRepoItemPath` if the app's own repo
+   is private, and `argocdProject` if this app should land in an ArgoCD `AppProject` other than
+   `apps` — see [Architecture](#architecture)). See `charts/tenant/values.schema.json` for the full
+   shape and `apps/website/config.json` for a real example.
+2. Create the 1Password items the config references — same 1Password-operator pattern as everywhere
+   else in this repo, see [1Password Operator](#1password-operator):
+   - `gitItemPath` — git read/write credential for Kargo's promotion commits.
+   - `imageItemPath` — image-registry pull credential, if the image is private.
+   - `argocdRepoItemPath` — git read credential for ArgoCD's repo-server to read
+     `deploy/overlays/{dev,prd}` from the app's own repo, if that repo is private. Needs the same
+     field shape as the ArgoCD repo secret described in
+     [Rotating the ArgoCD repo credential](#rotating-the-argocd-repo-credential): `type` (`git`),
+     `url` (matching `repoURL`), `username`, `password`.
 3. Commit and push — `charts/tenant` (surfaced the same way as any other app-of-apps child) picks it
    up and provisions everything above.
+
+**Skip `argocdRepoItemPath` entirely for a public app repo** — `apps/helloworld/` is the reference
+example of that case.
 
 **In the app's own repo** (see `dyegoe/website`'s `deploy/README.md` and `RELEASING.md` for the
 fully-worked example):

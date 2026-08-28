@@ -34,6 +34,7 @@ spec:
             onepassword:
               gitItemPath: "{{.onepassword.gitItemPath}}"
               imageItemPath: "{{ if index .onepassword `imageItemPath` }}{{ index .onepassword `imageItemPath` }}{{ end }}"
+              argocdRepoItemPath: "{{ if index .onepassword `argocdRepoItemPath` }}{{ index .onepassword `argocdRepoItemPath` }}{{ end }}"
       destination:
         server: https://kubernetes.default.svc
         namespace: "{{.appName}}"
