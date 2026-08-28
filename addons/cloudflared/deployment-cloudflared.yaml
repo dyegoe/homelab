@@ -29,7 +29,7 @@ spec:
             - name: TUNNEL_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: homelab-cloudflared-tunnel-token
+                  name: cloudflared-tunnel-token
                   key: credential
           command:
             # Configures tunnel run parameters
