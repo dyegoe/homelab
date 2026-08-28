@@ -155,9 +155,8 @@ prometheus-node-exporter:
 grafana:
   fullnameOverride: grafana
   defaultDashboardsTimezone: browser
-  podAnnotations:
-    operator.1password.io/item-path: "vaults/Kubernetes/items/homelab-grafana"
-    operator.1password.io/item-name: "grafana-admin-password"
+  annotations:
+    reloader.stakater.com/auto: "true"
   admin:
     existingSecret: grafana-admin-password
     userKey: username

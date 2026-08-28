@@ -6,4 +6,5 @@ resources:
   - httproute-grafana-redirect.yaml
   - httproute-prometheus.yaml
   - httproute-prometheus-redirect.yaml
+  - externalsecret-grafana-admin-password.yaml
   - externalsecret-telegram-bot-token.yaml
