@@ -12,15 +12,15 @@ spec:
   # The actual protection boundary for a given app's repo is its own Kargo git-write credential,
   # not this field.
   sourceRepos:
-    - '*'
+    - "*"
   destinations:
     - server: https://kubernetes.default.svc
-      namespace: '*'
+      namespace: "*"
   # Namespace: needed because the per-env child Applications (charts/tenant/templates/application.yaml)
   # set CreateNamespace=true for their own <appName>-dev/-prd namespaces.
   # kargo.akuity.io/Project: cluster-scoped (confirmed via CRD), created by charts/tenant/templates/project.yaml.
   clusterResourceWhitelist:
-    - group: ''
+    - group: ""
       kind: Namespace
     - group: kargo.akuity.io
       kind: Project
@@ -41,13 +41,13 @@ spec:
     # permit that resource kind for its own children, not just for the app's workload namespaces.
     - group: argoproj.io
       kind: Application
-    - group: ''
+    - group: ""
       kind: ConfigMap
-    - group: ''
+    - group: ""
       kind: Secret
-    - group: ''
+    - group: ""
       kind: ServiceAccount
-    - group: ''
+    - group: ""
       kind: Service
     - group: apps
       kind: Deployment
@@ -56,4 +56,6 @@ spec:
     - group: onepassword.com
       kind: OnePasswordItem
     - group: kargo.akuity.io
-      kind: '*'
+      kind: "*"
+    - group: ""
+      kind: PersistentVolumeClaim
