@@ -32,7 +32,6 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
     - [Known gotcha: URLs, Notes, and Sections aren't extracted](#known-gotcha-urls-notes-and-sections-arent-extracted)
     - [Creating a docker-registry (imagePullSecret) item](#creating-a-docker-registry-imagepullsecret-item)
     - [Migrating a bootstrap secret to External Secrets Operator](#migrating-a-bootstrap-secret-to-external-secrets-operator)
-    - [Legacy: 1Password Operator (app-repo image pull secrets only)](#legacy-1password-operator-app-repo-image-pull-secrets-only)
   - [Observability](#observability)
     - [Architecture](#architecture-1)
     - [Accessing Grafana](#accessing-grafana)
@@ -569,7 +568,6 @@ effect, since the git generator only refreshes the _parameters_ it iterates over
 | `sealed-secrets`                | `-6`      | yes       |                                                                                                                                                                                  |
 | `reloader`                      | `-5`      | yes       | Restarts Deployments annotated `reloader.stakater.com/auto: "true"` when a referenced Secret/ConfigMap changes — see [External Secrets Operator](#external-secrets-operator)     |
 | `external-secrets`              | `-5`      | yes       | See [External Secrets Operator](#external-secrets-operator)                                                                                                                      |
-| `onepassword`                   | `-5`      | yes       | Legacy — see [Legacy: 1Password Operator](#legacy-1password-operator-app-repo-image-pull-secrets-only)                                                                           |
 | `cert-manager`                  | `-4`      | yes       |                                                                                                                                                                                  |
 | `cloudflared`                   | `-4`      | yes       |                                                                                                                                                                                  |
 | `external-dns`                  | `-4`      | yes       |                                                                                                                                                                                  |
@@ -881,9 +879,10 @@ node.
 ## External Secrets Operator
 
 Migrated from a dedicated 1Password Operator (native `OnePasswordItem` CRD + a self-hosted 1Password
-Connect server) starting 2026-08-28. The driver was learning value, not a functional gap — see
-[Legacy: 1Password Operator](#legacy-1password-operator-app-repo-image-pull-secrets-only) for what
-this repo looked like before and what (as of this writing) still runs on the old path.
+Connect server) on 2026-08-28/29 — the driver was learning value, not a functional gap. The Operator
+(`addons/onepassword/`, its Connect server, and the `onepassworditems.onepassword.com` CRD) is fully
+removed as of 2026-08-29; every secret in this cluster, including the `ghcr-pull` image-pull secrets
+in the `dyegoe/website`/`dyegoe/catering-calculator` app repos, now goes through ESO.
 [External Secrets Operator](https://external-secrets.io/) (ESO) is the vendor-neutral,
 `ExternalSecret`/`SecretStore` CRD-based standard for this problem, and the `onepasswordSDK` provider
 talks to 1Password directly via a service-account token — no Connect server to run at all.
@@ -1098,21 +1097,6 @@ anything. Once ESO is up, it can take over managing that Secret:
 
 From this point on, rotating the PAT is just updating the `password` field on the 1Password item — see
 [Rotating the ArgoCD repo credential](#rotating-the-argocd-repo-credential).
-
-### Legacy: 1Password Operator (app-repo image pull secrets only)
-
-**Recheck trigger:** once `dyegoe/website` and `dyegoe/catering-calculator` have both migrated their
-`ghcr-pull` `OnePasswordItem`s (in `deploy/overlays/{dev,prd}`) to `ExternalSecret`s, delete this
-section, `argocd/addons/onepassword.yaml`, and `addons/onepassword/` entirely, and remove
-`onepassword.com/OnePasswordItem` from `argocd/install/appproject-apps.yaml`'s
-`namespaceResourceWhitelist`.
-
-As of this writing, the 1Password Operator (`addons/onepassword/`, chart `connect` — both its Connect
-server and its in-cluster operator/CRD) is still installed and still live, solely for those four
-`ghcr-pull` Secrets. Everything else described above (this repo's own addons, `charts/tenant`, the
-ArgoCD/Kargo bootstrap credentials) has fully moved to ESO. Do not add any new `OnePasswordItem` or
-`operator.1password.io/*` annotation anywhere — use ESO for anything new, even before this legacy
-pocket is cleaned up.
 
 ## Observability
 
