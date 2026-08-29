@@ -1,10 +1,21 @@
 ---
-apiVersion: onepassword.com/v1
-kind: OnePasswordItem
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
 metadata:
   name: kargo-repo-auth
   namespace: {{ .Values.appName }}
-  labels:
-    kargo.akuity.io/cred-type: git
 spec:
-  itemPath: {{ .Values.onepassword.gitItemPath }}
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword
+  target:
+    name: kargo-repo-auth
+    creationPolicy: Owner
+    template:
+      metadata:
+        labels:
+          kargo.akuity.io/cred-type: git
+  dataFrom:
+    - extract:
+        key: {{ .Values.onepassword.gitItem }}

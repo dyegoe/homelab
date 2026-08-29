@@ -9,7 +9,7 @@ resources:
   - servicemonitor-argocd-application-controller.yaml
   - servicemonitor-argocd-server.yaml
   - servicemonitor-argocd-notifications-controller.yaml
-  - onepassword-github-dyegoe-homelab.yaml
+  - externalsecret-github-dyegoe-homelab.yaml
   - appproject-addons.yaml
   - appproject-apps.yaml
 patches:

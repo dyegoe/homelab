@@ -31,21 +31,21 @@
     "onepassword": {
       "type": "object",
       "properties": {
-        "gitItemPath": {
+        "gitItem": {
           "type": "string",
-          "description": "The path to the 1Password item containing the application's Git repository credentials to be used by Kargo. 1Password item must have the following fields: 'username', 'password', and 'repoURL'"
+          "description": "The title of the 1Password item containing the application's Git repository credentials to be used by Kargo. 1Password item must have the following fields: 'username', 'password', and 'repoURL'"
         },
-        "imageItemPath": {
+        "imageItem": {
           "type": "string",
-          "description": "The path to the 1Password item containing the application's container image credentials if the image is private. 1Password item must have the following fields: 'username', 'password', and 'repoURL'"
+          "description": "The title of the 1Password item containing the application's container image credentials if the image is private. 1Password item must have the following fields: 'username', 'password', and 'repoURL'"
         },
-        "argocdRepoItemPath": {
+        "argocdRepoItem": {
           "type": "string",
-          "description": "The path to the 1Password item containing the application's Git repository credentials for ArgoCD to read the app's own repo, required if repoURL is private. 1Password item must have the following fields: 'type' (value 'git'), 'url' (matching repoURL), 'username', and 'password'"
+          "description": "The title of the 1Password item containing the application's Git repository credentials for ArgoCD to read the app's own repo, required if repoURL is private. 1Password item must have the following fields: 'type' (value 'git'), 'url' (matching repoURL), 'username', and 'password'"
         }
       },
       "required": [
-        "gitItemPath"
+        "gitItem"
       ]
     }
   },

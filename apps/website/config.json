@@ -3,8 +3,8 @@
   "repoURL": "https://github.com/dyegoe/website.git",
   "imageURL": "ghcr.io/dyegoe/website",
   "onepassword": {
-    "gitItemPath": "vaults/Kubernetes/items/homelab-gh-pat-kargo-website",
-    "imageItemPath": "vaults/Kubernetes/items/homelab-gh-pat-registry-ghcr-website",
-    "argocdRepoItemPath": "vaults/Kubernetes/items/homelab-gh-pat-argocd-website"
+    "gitItem": "homelab-gh-pat-kargo-website",
+    "imageItem": "homelab-gh-pat-registry-ghcr-website",
+    "argocdRepoItem": "homelab-gh-pat-argocd-website"
   }
 }

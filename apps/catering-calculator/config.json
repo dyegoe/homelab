@@ -3,8 +3,8 @@
   "repoURL": "https://github.com/dyegoe/catering-calculator.git",
   "imageURL": "ghcr.io/dyegoe/catering-calculator",
   "onepassword": {
-    "gitItemPath": "vaults/Kubernetes/items/homelab-gh-pat-kargo-catering-calculator",
-    "imageItemPath": "vaults/Kubernetes/items/homelab-gh-pat-registry-ghcr-catering-calculator",
-    "argocdRepoItemPath": "vaults/Kubernetes/items/homelab-gh-pat-argocd-catering-calculator"
+    "gitItem": "homelab-gh-pat-kargo-catering-calculator",
+    "imageItem": "homelab-gh-pat-registry-ghcr-catering-calculator",
+    "argocdRepoItem": "homelab-gh-pat-argocd-catering-calculator"
   }
 }

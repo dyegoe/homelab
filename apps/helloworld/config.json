@@ -3,6 +3,6 @@
   "repoURL": "https://github.com/dyegoe/helloworld.git",
   "imageURL": "ghcr.io/dyegoe/helloworld",
   "onepassword": {
-    "gitItemPath": "vaults/Kubernetes/items/homelab-gh-pat-kargo-helloworld"
+    "gitItem": "homelab-gh-pat-kargo-helloworld"
   }
 }
