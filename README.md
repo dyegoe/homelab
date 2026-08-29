@@ -26,11 +26,13 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
     - [Forcing an immediate refresh (GitHub webhook)](#forcing-an-immediate-refresh-github-webhook)
   - [Advanced Networking](#advanced-networking)
     - [Mikrotik BGP configuration](#mikrotik-bgp-configuration)
-  - [1Password Operator](#1password-operator)
+  - [External Secrets Operator](#external-secrets-operator)
     - [Installation](#installation)
     - [How to use](#how-to-use)
+    - [Known gotcha: URLs, Notes, and Sections aren't extracted](#known-gotcha-urls-notes-and-sections-arent-extracted)
     - [Creating a docker-registry (imagePullSecret) item](#creating-a-docker-registry-imagepullsecret-item)
-    - [Migrating a bootstrap secret to 1Password](#migrating-a-bootstrap-secret-to-1password)
+    - [Migrating a bootstrap secret to External Secrets Operator](#migrating-a-bootstrap-secret-to-external-secrets-operator)
+    - [Legacy: 1Password Operator (app-repo image pull secrets only)](#legacy-1password-operator-app-repo-image-pull-secrets-only)
   - [Observability](#observability)
     - [Architecture](#architecture-1)
     - [Accessing Grafana](#accessing-grafana)
@@ -383,13 +385,21 @@ Before any of this, create the 1Password item the repo credential is sourced fro
 - Name: `homelab-gh-pat-argocd-homelab`
 - Username: `dyegoe`
 - Password: a GitHub fine-grained PAT, scoped read-only to this repo
-- Rename the default `website` field to `url`, value `https://github.com/dyegoe/homelab.git`
+- Add a new `text` field named `url`, value `https://github.com/dyegoe/homelab.git`
 - Add a new `text` field named `type`, value `git`
+
+**Do not** rename/reuse the item's built-in `website` field for `url` — add `url` as a genuine new
+`text` field instead. External Secrets Operator's `onepasswordSDK` provider (see
+[External Secrets Operator](#external-secrets-operator)) only reads an item's custom `Fields[]`; it
+silently ignores the built-in URLs/Notes/Sections blocks, so a value stored in the built-in website
+widget never reaches the generated Secret at all. This exact mistake broke ArgoCD's own repo
+credential for real on 2026-08-29 during the 1Password-Operator→ESO migration — see
+[Known gotcha: URLs, Notes, and Sections aren't extracted](#known-gotcha-urls-notes-and-sections-arent-extracted).
 
 The Login item's built-in `username`/`password` fields plus the two custom fields (`url`, `type`) map
 1:1 onto the four keys ArgoCD's repo Secret needs below — and again later, unchanged, once this Secret
-is handed off to the 1Password Operator (see
-[Migrating a bootstrap secret to 1Password](#migrating-a-bootstrap-secret-to-1password)).
+is handed off to External Secrets Operator (see
+[Migrating a bootstrap secret to External Secrets Operator](#migrating-a-bootstrap-secret-to-external-secrets-operator)).
 
 ```bash
 # Namespace for ArgoCD
@@ -557,7 +567,9 @@ effect, since the git generator only refreshes the _parameters_ it iterates over
 | `kubelet-serving-cert-approver` | `-6`      | yes       |                                                                                                                                                                                  |
 | `metrics-server`                | `-6`      | yes       |                                                                                                                                                                                  |
 | `sealed-secrets`                | `-6`      | yes       |                                                                                                                                                                                  |
-| `onepassword`                   | `-5`      | yes       |                                                                                                                                                                                  |
+| `reloader`                      | `-5`      | yes       | Restarts Deployments annotated `reloader.stakater.com/auto: "true"` when a referenced Secret/ConfigMap changes — see [External Secrets Operator](#external-secrets-operator)     |
+| `external-secrets`              | `-5`      | yes       | See [External Secrets Operator](#external-secrets-operator)                                                                                                                      |
+| `onepassword`                   | `-5`      | yes       | Legacy — see [Legacy: 1Password Operator](#legacy-1password-operator-app-repo-image-pull-secrets-only)                                                                           |
 | `cert-manager`                  | `-4`      | yes       |                                                                                                                                                                                  |
 | `cloudflared`                   | `-4`      | yes       |                                                                                                                                                                                  |
 | `external-dns`                  | `-4`      | yes       |                                                                                                                                                                                  |
@@ -613,8 +625,8 @@ kind of reviewable PR.
 ### Adding a new standalone app via Kargo
 
 `charts/tenant` is the reusable Helm chart — it creates the app's Kargo `Project`/`ProjectConfig`,
-its `dev`/`prd` `Warehouse`/`Stage`s, the `kargo-repo-auth`/`kargo-image-auth` `OnePasswordItem`s,
-an `argocd-repo-auth` `OnePasswordItem` if the app's own repo is private, and (mirroring what
+its `dev`/`prd` `Warehouse`/`Stage`s, the `kargo-repo-auth`/`kargo-image-auth` `ExternalSecret`s,
+an `argocd-repo-auth` `ExternalSecret` if the app's own repo is private, and (mirroring what
 `apps-applicationset` would otherwise generate per app — see
 [Standalone apps (ApplicationSet)](#standalone-apps-applicationset)) the `<app>-dev`/`<app>-prd`
 ArgoCD `Application`s themselves — all governed by the `apps` `AppProject` by default (see
@@ -623,24 +635,29 @@ to copy.
 
 **In this repo:**
 
-1. `apps/<app-name>/config.json` — `appName`, `repoURL`, `imageURL`, and `onepassword.gitItemPath`
-   (+ `imageItemPath` if the image registry is private, `argocdRepoItemPath` if the app's own repo
+1. `apps/<app-name>/config.json` — `appName`, `repoURL`, `imageURL`, and `onepassword.gitItem`
+   (+ `imageItem` if the image registry is private, `argocdRepoItem` if the app's own repo
    is private, and `argocdProject` if this app should land in an ArgoCD `AppProject` other than
-   `apps` — see [Architecture](#architecture)). See `charts/tenant/values.schema.json` for the full
-   shape and `apps/website/config.json` for a real example.
-2. Create the 1Password items the config references — same 1Password-operator pattern as everywhere
-   else in this repo, see [1Password Operator](#1password-operator):
-   - `gitItemPath` — git read/write credential for Kargo's promotion commits.
-   - `imageItemPath` — image-registry pull credential, if the image is private.
-   - `argocdRepoItemPath` — git read credential for ArgoCD's repo-server to read
+   `apps` — see [Architecture](#architecture)). Each `*Item` value is a 1Password item **title**
+   (not a full `vaults/.../items/...` path — the vault is already fixed on the cluster-wide
+   `ClusterSecretStore`, see [External Secrets Operator](#external-secrets-operator)). See
+   `charts/tenant/values.schema.json` for the full shape and `apps/website/config.json` for a real
+   example.
+2. Create the 1Password items the config references — same External-Secrets-Operator pattern as
+   everywhere else in this repo, see [External Secrets Operator](#external-secrets-operator):
+   - `gitItem` — git read/write credential for Kargo's promotion commits.
+   - `imageItem` — image-registry pull credential, if the image is private.
+   - `argocdRepoItem` — git read credential for ArgoCD's repo-server to read
      `deploy/overlays/{dev,prd}` from the app's own repo, if that repo is private. Needs the same
      field shape as the ArgoCD repo secret described in
      [Rotating the ArgoCD repo credential](#rotating-the-argocd-repo-credential): `type` (`git`),
-     `url` (matching `repoURL`), `username`, `password`.
+     `url` (matching `repoURL`), `username`, `password` — `url` **must** be a genuine custom `text`
+     field, not the item's built-in website widget, or it silently won't sync (see
+     [Known gotcha: URLs, Notes, and Sections aren't extracted](#known-gotcha-urls-notes-and-sections-arent-extracted)).
 3. Commit and push — `charts/tenant` (surfaced the same way as any other app-of-apps child) picks it
    up and provisions everything above.
 
-**Skip `argocdRepoItemPath` entirely for a public app repo** — `apps/helloworld/` is the reference
+**Skip `argocdRepoItem` entirely for a public app repo** — `apps/helloworld/` is the reference
 example of that case.
 
 **In the app's own repo** (see `dyegoe/website`'s `deploy/README.md` and `RELEASING.md` for the
@@ -714,10 +731,11 @@ fully-worked example):
 Application was needed.
 
 **Admin login:** `api.secret.name: kargo-admin` in `addons/kargo/helm/values.yaml` points at a Secret
-materialized by `addons/kargo/onepassword-kargo-admin.yaml` (same 1Password-operator pattern as
-Grafana/cloudflared/the ArgoCD repo credential — see [1Password Operator](#1password-operator)),
-rather than inlining `api.adminAccount.passwordHash`/`tokenSigningKey` in git. One-time setup, since
-this repo never runs cluster-mutating or 1Password-mutating commands on your behalf:
+materialized by `addons/kargo/externalsecret-kargo-admin.yaml` (same External-Secrets-Operator
+pattern as Grafana/cloudflared/the ArgoCD repo credential — see
+[External Secrets Operator](#external-secrets-operator)), rather than inlining
+`api.adminAccount.passwordHash`/`tokenSigningKey` in git. One-time setup, since this repo never runs
+cluster-mutating or 1Password-mutating commands on your behalf:
 
 1. Generate a password, its bcrypt hash, and a token signing key (same recipe as
    [Kargo's own install docs](https://docs.kargo.io/operator-guide/basic-installation)):
@@ -733,7 +751,7 @@ this repo never runs cluster-mutating or 1Password-mutating commands on your beh
 
 2. Create a 1Password item at vault `Kubernetes`, named `homelab-kargo-admin`, with three custom
    `text`/`password` fields (field **labels** become Secret keys verbatim, same as the Telegram bot
-   token item — see [1Password Operator](#1password-operator)):
+   token item — see [External Secrets Operator](#external-secrets-operator)):
    - `ADMIN_ACCOUNT_PASSWORD_HASH` → `$hashed_pass`
    - `ADMIN_ACCOUNT_TOKEN_SIGNING_KEY` → `$signing_key`
    - a field for the plaintext `$pass` too (e.g. `admin-password-plaintext`) — only Kargo's UI login
@@ -758,22 +776,23 @@ the `kargo-api` Service listens on port `80`, matching the HTTPRoute's `backendR
 
 ### Rotating the ArgoCD repo credential
 
-`argocd/repo-homelab` holds the GitHub fine-grained PAT ArgoCD uses to read this repository. It started
-as a plain imperative Secret at [Bootstrap ArgoCD](#bootstrap-from-zero) — the chicken-and-egg credential
-that has to exist before ArgoCD can sync anything, including the 1Password Operator. Once the Operator
-was up, it took over managing this Secret via a `OnePasswordItem` CR (see
-[Migrating a bootstrap secret to 1Password](#migrating-a-bootstrap-secret-to-1password) for how that
-migration was done) — rotation is no longer a manual `kubectl patch`.
+`argocd/repo-gh-dyegoe-homelab` holds the GitHub fine-grained PAT ArgoCD uses to read this repository.
+It started as a plain imperative Secret at [Bootstrap ArgoCD](#bootstrap-from-zero) — the
+chicken-and-egg credential that has to exist before ArgoCD can sync anything, including External
+Secrets Operator itself. Once ESO was up, it took over managing this Secret via an `ExternalSecret`
+(`argocd/install/externalsecret-github-dyegoe-homelab.yaml`; see
+[Migrating a bootstrap secret to External Secrets Operator](#migrating-a-bootstrap-secret-to-external-secrets-operator)
+for how that migration was done) — rotation is no longer a manual `kubectl patch`.
 
 **Source of truth:** 1Password item `homelab-gh-pat-argocd-homelab` (vault `Kubernetes`), field
 `password`. Rotate roughly every 30-90 days as best practice.
 
-**To rotate:** update the `password` field on that 1Password item with the new PAT. The 1Password
-Operator reconciles the `repo-homelab` Secret from the item on its own polling interval (see the
-[operator docs](https://developer.1password.com/docs/k8s/operator/)) — no `kubectl` required. Verify
-once it's picked up:
+**To rotate:** update the `password` field on that 1Password item with the new PAT. ESO reconciles the
+`repo-gh-dyegoe-homelab` Secret from the item on its `refreshInterval` (`1h` on this `ExternalSecret`)
+— no `kubectl` required, but to force it immediately instead of waiting:
 
 ```bash
+kubectl -n argocd annotate externalsecret repo-gh-dyegoe-homelab force-sync=$(date +%s) --overwrite
 argocd repo get --refresh hard https://github.com/dyegoe/homelab.git   # STATUS should be Successful
 argocd app list | awk 'NR==1 || /Unknown|ComparisonError/'             # should be empty after a refresh
 ```
@@ -781,10 +800,15 @@ argocd app list | awk 'NR==1 || /Unknown|ComparisonError/'             # should 
 If apps are still showing stale `ComparisonError`, refresh them (`argocd app get <name> --refresh`) — the
 auto-sync loop also picks up the new credential within a few minutes.
 
-**Manual fallback**, if the Operator itself is down or hasn't picked up the change:
+**Manual fallback only works if ESO itself is down** (controller crash-looping, `ClusterSecretStore`
+not `Valid`, etc.) — confirmed the hard way on 2026-08-29: if ESO is up but reconciling, it watches
+Secrets it owns and reverts a manual edit almost immediately (well inside a minute, not on the
+`refreshInterval`), so a plain `kubectl patch`/`edit` against a healthy ESO does nothing useful. Check
+`kubectl get clustersecretstore onepassword` and `kubectl -n external-secrets get pods` first. If ESO
+really is down:
 
 ```bash
-kubectl -n argocd patch secret repo-homelab \
+kubectl -n argocd patch secret repo-gh-dyegoe-homelab \
   --type=merge \
   -p "{\"stringData\":{\"password\":\"$(op item get 'homelab-gh-pat-argocd-homelab' --fields password --reveal)\"}}"
 ```
@@ -854,80 +878,145 @@ node.
 /routing/bgp/connection/add name=k8s instance=k8s remote.address=172.31.86.0/24 remote.as=64512 local.address=172.31.86.1 local.role=ibgp listen=yes routing-table=main templates=k8s as=64512 afi=ip
 ```
 
-## 1Password Operator
+## External Secrets Operator
+
+Migrated from a dedicated 1Password Operator (native `OnePasswordItem` CRD + a self-hosted 1Password
+Connect server) starting 2026-08-28. The driver was learning value, not a functional gap — see
+[Legacy: 1Password Operator](#legacy-1password-operator-app-repo-image-pull-secrets-only) for what
+this repo looked like before and what (as of this writing) still runs on the old path.
+[External Secrets Operator](https://external-secrets.io/) (ESO) is the vendor-neutral,
+`ExternalSecret`/`SecretStore` CRD-based standard for this problem, and the `onepasswordSDK` provider
+talks to 1Password directly via a service-account token — no Connect server to run at all.
 
 ### Installation
 
-Create the 1Password connect server. This will output a file `1password-credentials.json`.
+Create a 1Password service account, scoped to read-only access on the `Kubernetes` vault (a service
+account can never be granted the built-in Personal/Private/Employee vaults or the default Shared
+vault, so a named vault like `Kubernetes` is required):
 
 ```bash
-op connect server create kubernetes-homelab --vaults Kubernetes
+op service-account create k8s-eso --vault Kubernetes:read_items
 ```
 
-Create the 1Password connect token for the operator to use. Save the output token securely.
+Seal the resulting token the same way every other bootstrap secret in this repo is sealed (see
+[Migrating a bootstrap secret to External Secrets Operator](#migrating-a-bootstrap-secret-to-external-secrets-operator)
+for why this one specifically has to exist before ESO can sync anything else):
 
 ```bash
-op connect token create kubernetes-operator --server kubernetes-homelab --vault Kubernetes
+kubectl create secret generic onepassword-sa-token \
+  --from-literal=token='<service-account-token>' \
+  --namespace external-secrets --dry-run=client -o yaml > raw-sa-token.yaml
+kubeseal -o yaml < raw-sa-token.yaml > sealedsecret-onepassword-sa-token.yaml
+rm raw-sa-token.yaml
 ```
 
-Create a sealed secret for the credentials file.
+One cluster-wide `ClusterSecretStore` (`addons/external-secrets/clustersecretstore-onepassword.yaml`)
+wires that token to the `Kubernetes` vault — every `ExternalSecret` in this cluster references it by
+name, regardless of namespace:
 
-```bash
-kubectl create secret generic onepassword-connect-credentials --from-file=1password-credentials.json=./1password-credentials.json --namespace onepassword --dry-run=client -o yaml > raw-credentials.yaml
-kubeseal -o yaml < raw-credentials.yaml > sealedsecret-onepassword-connect-credentials.yaml
-kubectl create secret generic onepassword-connect-token --from-literal=token="<your-token-here>" --namespace onepassword --dry-run=client -o yaml > raw-token.yaml
-kubeseal -o yaml < raw-token.yaml > sealedsecret-onepassword-connect-token.yaml
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: onepassword
+spec:
+  provider:
+    onepasswordSDK:
+      vault: Kubernetes
+      auth:
+        serviceAccountSecretRef:
+          name: onepassword-sa-token
+          key: token
+          namespace: external-secrets
+      cache:
+        ttl: 5m
+        maxSize: 100
 ```
 
-Remove the raw files.
-
-```bash
-rm raw-*.yaml 1password-credentials.json
-```
+Pod restarts on secret rotation (the old Operator's `autoRestart`) are covered by a separate addon,
+[stakater/reloader](https://github.com/stakater/Reloader) — annotate a Deployment with
+`reloader.stakater.com/auto: "true"` and it restarts automatically when a Secret/ConfigMap it
+references changes. Every workload consuming an ESO-managed Secret via an env var or non-Kargo/-Grafana
+credential should carry this annotation; `cloudflared`, `external-dns`, and `kube-prometheus-stack`'s
+Grafana are the current examples.
 
 ### How to use
 
-You can create a OnePasswordItem resource to fetch secrets from 1Password. For example:
+Create an `ExternalSecret` to fetch a whole 1Password item's fields into a Secret. `remoteRef.key`
+(or `extract.key`) is the item's **title**, not a full `vaults/.../items/...` path — the vault is
+already fixed on the `ClusterSecretStore` above:
 
 ```yaml
 ---
-apiVersion: onepassword.com/v1
-kind: OnePasswordItem
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
 metadata:
   name: SECRET_NAME
 spec:
-  itemPath: "vaults/VAULT/items/ITEM"
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword
+  target:
+    name: SECRET_NAME
+    creationPolicy: Owner
+  dataFrom:
+    - extract:
+        key: ITEM_TITLE
 ```
 
-Or use the Deployment annotation to inject secrets directly into pods:
+Every field **label** on the item becomes a Secret data key, verbatim — same generic mechanism the
+old Operator used. To pull a single field instead of the whole item (useful when the item carries
+built-in fields beyond the one you need — see the gotcha below), add `property: FIELD_LABEL` under
+`extract`, or use `data:`/`remoteRef` instead of `dataFrom:`/`extract` for an explicit per-key list.
+To add labels or a Secret `type` without touching what's fetched, use `target.template.metadata` (see
+`argocd-repo-auth.yaml`'s `argocd.argoproj.io/secret-type: repository` label in `charts/tenant`) — and
+if you also need `target.template.data`, set `mergePolicy: Merge` or every fetched field not
+explicitly re-listed there gets silently dropped.
 
-```yaml
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: deployment-example
-  annotations:
-    operator.1password.io/item-path: "vaults/VAULT/items/ITEM"
-    operator.1password.io/item-name: "SECRET_NAME"
-```
+There is no annotation-based auto-inject equivalent to the old Operator's
+`operator.1password.io/item-path`/`item-name` Deployment annotations — every consumer gets an
+explicit `ExternalSecret` resource instead, which is more verbose but fully reviewable in a diff
+(the same tradeoff this repo already made for Helm values vs `--set`, see
+[Architecture](#architecture)).
 
-For more information, refer to the [official documentation](https://developer.1password.com/docs/k8s/operator/).
+### Known gotcha: URLs, Notes, and Sections aren't extracted
+
+The `onepasswordSDK` provider's `extract`/`property` only reads an item's custom `Fields[]`. It
+silently ignores 1Password's built-in structural blocks — the item's URLs/website widget, its Notes
+section, and any field living inside a named Section — even though the old Connect-based Operator
+surfaced some of these (flattened under whatever label they had, e.g. a URL field labeled `website`
+or a renamed label like `url`). There is no error: the field is just absent from the generated
+Secret, same shape as a field that was never created.
+
+This broke ArgoCD's own repo credential for real on 2026-08-29, mid-migration: the `homelab-gh-pat-argocd-homelab`
+item had its `url` value stored in the built-in website widget (renamed from the default `website`
+label), so `extract` produced a Secret with `type`/`username`/`password` but no `url` — and ArgoCD
+indexes repo credentials by `url`, so it lost the ability to read this repository entirely until the
+field was recreated as a genuine custom `text` field. It also (harmlessly, since nothing reads them)
+dropped `kargo-admin`'s and `grafana-admin-password`'s built-in `website` field, and
+`kargo-image-auth`'s built-in Notes field.
+
+**When creating or auditing any 1Password item an `ExternalSecret` reads:** every field the Secret
+needs must be a genuine custom `text`/`password` field, never the item's built-in website/Notes/Section
+UI widgets, even if 1Password lets you rename that widget's label to look like a normal field.
 
 ### Creating a docker-registry (imagePullSecret) item
 
-The Operator has no docker-registry-specific logic: it copies 1Password item field **labels**
-straight into the generated Secret's `data` keys, verbatim — the same generic mechanism as [How to
+ESO has no docker-registry-specific logic: `extract` copies 1Password item field **labels** straight
+into the generated Secret's `data` keys, verbatim — the same generic mechanism as [How to
 use](#how-to-use) above. To get a working `kubernetes.io/dockerconfigjson` image pull secret out of
 it, two things have to line up:
 
-1. The `OnePasswordItem` needs a top-level `type: kubernetes.io/dockerconfigjson` (a real field on
-   the CRD, sibling of `metadata`/`spec` — not a `spec` field), which the Operator copies onto the
-   generated Secret's `type`. See `apps/website/dev/onepassword-ghcr-pull.yaml` for a real example.
+1. The `ExternalSecret` needs `target.template.type: kubernetes.io/dockerconfigjson` (with
+   `mergePolicy: Merge` if `template.data` is also set, so the extracted fields still pass through).
 2. Kubernetes requires that Secret type to carry exactly one data key, `.dockerconfigjson`,
    containing the full Docker config JSON. So the 1Password item itself needs a field **labeled
    exactly `.dockerconfigjson`** (the leading dot is a valid Secret data-key character, so it's
-   preserved as-is) whose value is that JSON blob — not the individual username/password.
+   preserved as-is) whose value is that JSON blob — not the individual username/password. See
+   `charts/tenant/templates/kargo-image-auth.yaml` / the `kargo-image-auth` `ExternalSecret` for a
+   real example already using this pattern (extracting the whole item, `.dockerconfigjson` field
+   included).
 
 Generate that JSON blob with `kubectl` (`--dry-run=client` never touches the cluster) and a PAT
 pulled straight from the same 1Password item, then paste the output into the `.dockerconfigjson`
@@ -941,41 +1030,65 @@ kubectl create secret docker-registry ghcr-pull \
   --dry-run=client -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d
 ```
 
-Kustomize/ArgoCD only ever render the `OnePasswordItem` pointer above — it carries no secret
-material. The real Secret is materialized afterward, in-cluster, when the Operator reconciles that
-CR against 1Password directly; there's no way for Kustomize itself to build a docker-registry Secret
-from a 1Password item (it has no 1Password awareness, and its generators only read literals/files
-already present in the repo at render time).
+Kustomize/ArgoCD only ever render the `ExternalSecret` pointer above — it carries no secret material.
+The real Secret is materialized afterward, in-cluster, when ESO reconciles that resource against
+1Password directly; there's no way for Kustomize itself to build a docker-registry Secret from a
+1Password item (it has no 1Password awareness, and its generators only read literals/files already
+present in the repo at render time).
 
-### Migrating a bootstrap secret to 1Password
+### Migrating a bootstrap secret to External Secrets Operator
 
-Worked example: the ArgoCD repo credential (`argocd/repo-homelab`, see
+Worked example: the ArgoCD repo credential (`argocd/repo-gh-dyegoe-homelab`, see
 [Bootstrap ArgoCD](#bootstrap-from-zero), including the 1Password item it's sourced from) started as a
-plain imperative Secret, since it has to exist before ArgoCD — and therefore before the 1Password
-Operator — can sync anything. Once the Operator is up, it can take over managing that Secret:
+plain imperative Secret, since it has to exist before ArgoCD — and therefore before ESO — can sync
+anything. Once ESO is up, it can take over managing that Secret:
 
-1. Add the `OnePasswordItem` manifest (`argocd/install/onepassword-github-dyegoe-homelab.yaml`), pointing
-   at the same 1Password item created during bootstrap:
+1. Add the `ExternalSecret` manifest (`argocd/install/externalsecret-github-dyegoe-homelab.yaml`),
+   pointing at the same 1Password item created during bootstrap:
 
    ```yaml
-   apiVersion: onepassword.com/v1
-   kind: OnePasswordItem
+   apiVersion: external-secrets.io/v1
+   kind: ExternalSecret
    metadata:
-     name: repo-homelab-token
-     labels:
-       argocd.argoproj.io/secret-type: repository
+     name: repo-gh-dyegoe-homelab
+     namespace: argocd
    spec:
-     itemPath: "vaults/Kubernetes/items/homelab-gh-pat-argocd-homelab"
+     refreshInterval: 1h
+     secretStoreRef:
+       kind: ClusterSecretStore
+       name: onepassword
+     target:
+       name: repo-gh-dyegoe-homelab
+       creationPolicy: Owner
+       template:
+         metadata:
+           labels:
+             argocd.argoproj.io/secret-type: repository
+     dataFrom:
+       - extract:
+           key: homelab-gh-pat-argocd-homelab
    ```
 
 2. Wire it into `argocd/install/kustomization.yaml`'s `resources`.
 
-3. Commit and push. Once ArgoCD syncs, the Operator creates `repo-homelab` itself — delete the original
-   imperative Secret:
+3. Commit and push. Once ArgoCD syncs, it prunes the previous resource pointing at this Secret
+   (whatever mechanism owned it before — a `OnePasswordItem` CR, or nothing at all for a truly
+   imperative bootstrap Secret). **If the Secret already exists and is owned by something else**
+   (an `ownerReference` to a CR, or no owner at all), ESO's `creationPolicy: Owner` won't adopt it —
+   delete it by hand once the `ExternalSecret` is `Ready`, and ESO recreates it under its own
+   ownership:
 
    ```bash
-   kubectl -n argocd delete secret repo-homelab
+   kubectl -n argocd delete secret repo-gh-dyegoe-homelab
    ```
+
+   Note this can also happen automatically and by surprise: if the Secret's _previous_ owner was a
+   CR that ArgoCD prunes in the same sync as this change (as happened here — the old
+   `OnePasswordItem`), Kubernetes garbage-collects the Secret the instant the CR is pruned, before
+   ESO gets a chance to react. ESO recreates it right away, but until it does there's a real gap
+   where the credential doesn't exist — for a credential ArgoCD itself depends on to sync (like this
+   one), that gap can look like a full repo-access outage. Watch `argocd repo list` after this kind
+   of change, not just the `ExternalSecret`'s own `Ready` condition.
 
 4. Verify:
 
@@ -985,6 +1098,21 @@ Operator — can sync anything. Once the Operator is up, it can take over managi
 
 From this point on, rotating the PAT is just updating the `password` field on the 1Password item — see
 [Rotating the ArgoCD repo credential](#rotating-the-argocd-repo-credential).
+
+### Legacy: 1Password Operator (app-repo image pull secrets only)
+
+**Recheck trigger:** once `dyegoe/website` and `dyegoe/catering-calculator` have both migrated their
+`ghcr-pull` `OnePasswordItem`s (in `deploy/overlays/{dev,prd}`) to `ExternalSecret`s, delete this
+section, `argocd/addons/onepassword.yaml`, and `addons/onepassword/` entirely, and remove
+`onepassword.com/OnePasswordItem` from `argocd/install/appproject-apps.yaml`'s
+`namespaceResourceWhitelist`.
+
+As of this writing, the 1Password Operator (`addons/onepassword/`, chart `connect` — both its Connect
+server and its in-cluster operator/CRD) is still installed and still live, solely for those four
+`ghcr-pull` Secrets. Everything else described above (this repo's own addons, `charts/tenant`, the
+ArgoCD/Kargo bootstrap credentials) has fully moved to ESO. Do not add any new `OnePasswordItem` or
+`operator.1password.io/*` annotation anywhere — use ESO for anything new, even before this legacy
+pocket is cleaned up.
 
 ## Observability
 
@@ -1016,10 +1144,13 @@ StatefulSet recreation) — see the comments in those files for specifics.
 
 ### Accessing Grafana
 
-`https://grafana.nodes.ee`. Credentials come from the `homelab-grafana` 1Password item (`username`/
-`confirmNew` fields), wired in via `grafana.podAnnotations` in
-`addons/kube-prometheus-stack/helm/values.yaml` (same 1Password-operator annotation pattern as
-`cloudflared`/`external-dns` — see [1Password Operator](#1password-operator)).
+`https://grafana.nodes.ee`. Credentials come from the `homelab-grafana` 1Password item, materialized by
+`addons/kube-prometheus-stack/externalsecret-grafana-admin-password.yaml` (an `ExternalSecret` —
+see [External Secrets Operator](#external-secrets-operator)) into the `grafana-admin-password` Secret,
+which `grafana.admin.existingSecret`/`userKey: username`/`passwordKey: password` in
+`addons/kube-prometheus-stack/helm/values.yaml` point at. Note the Secret key is `password`, not the
+1Password item's `confirmNew` field label — the SDK provider surfaces this item's built-in password
+field under the key `password` regardless of what custom label the field itself carries in 1Password.
 
 ### Viewing logs
 
@@ -1056,9 +1187,12 @@ Talos service.
 Alertmanager routes to a `telegram` receiver by default (`addons/kube-prometheus-stack/helm/values.yaml`'s
 `alertmanager.config`), ported from the old homelab-gitops repo's setup. The bot token/chat ID come from
 the existing `homelab-telegram-bot-token` 1Password item (API Credential type: `credential` field is the
-bot token, `chat_id` is the target chat) via the same `operator.1password.io/item-path` annotation pattern
-used for Grafana/cloudflared — see [1Password Operator](#1password-operator) — injected as a Secret
-mounted into the Alertmanager pod at `/etc/alertmanager/secrets/telegram-bot-token/`.
+bot token, `chat_id` is the target chat) via `addons/kube-prometheus-stack/externalsecret-telegram-bot-token.yaml`
+(an `ExternalSecret` extracting the whole item — see [External Secrets Operator](#external-secrets-operator))
+— injected as a Secret mounted into the Alertmanager pod at `/etc/alertmanager/secrets/telegram-bot-token/`.
+Alertmanager's StatefulSet-owned pod isn't covered by the Reloader annotation pattern used for
+Grafana/cloudflared/external-dns, but since the Secret is file-mounted (not an env var), the kubelet
+propagates a rotated value into the running pod on its own — no restart needed either way.
 kube-prometheus-stack's own default `inhibit_rules`/`templates` are left untouched (only `route`/
 `receivers` are overridden), so Helm's map merge keeps the chart's severity-based inhibition.
 

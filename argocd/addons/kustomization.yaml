@@ -9,7 +9,6 @@ resources:
   - sealed-secrets.yaml
   - metrics-server.yaml
   - kubelet-serving-cert-approver.yaml
-  - onepassword.yaml
   - external-secrets.yaml
   - reloader.yaml
   - cert-manager.yaml
