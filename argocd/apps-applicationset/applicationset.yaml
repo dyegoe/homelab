@@ -32,9 +32,9 @@ spec:
             imageURL: "{{.imageURL}}"
             argocdProject: "{{ if index . `argocdProject` }}{{ index . `argocdProject` }}{{ end }}"
             onepassword:
-              gitItemPath: "{{.onepassword.gitItemPath}}"
-              imageItemPath: "{{ if index .onepassword `imageItemPath` }}{{ index .onepassword `imageItemPath` }}{{ end }}"
-              argocdRepoItemPath: "{{ if index .onepassword `argocdRepoItemPath` }}{{ index .onepassword `argocdRepoItemPath` }}{{ end }}"
+              gitItem: "{{.onepassword.gitItem}}"
+              imageItem: "{{ if index .onepassword `imageItem` }}{{ index .onepassword `imageItem` }}{{ end }}"
+              argocdRepoItem: "{{ if index .onepassword `argocdRepoItem` }}{{ index .onepassword `argocdRepoItem` }}{{ end }}"
       destination:
         server: https://kubernetes.default.svc
         namespace: "{{.appName}}"
