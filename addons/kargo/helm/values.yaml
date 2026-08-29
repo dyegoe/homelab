@@ -19,6 +19,12 @@ api:
     # ADMIN_ACCOUNT_PASSWORD_HASH and ADMIN_ACCOUNT_TOKEN_SIGNING_KEY - see README.md's Kargo
     # section for how those are generated and stored in 1Password.
     name: kargo-admin
+  # kargo-admin is loaded via envFrom, not re-read at runtime - without Reloader, rotating it in
+  # 1Password updates the Secret but the running pod keeps the stale admin password hash/signing
+  # key until something else happens to restart it. annotations (not podAnnotations) is required -
+  # Reloader's auto annotation has to sit on the Deployment itself, same as grafana/external-dns.
+  annotations:
+    reloader.stakater.com/auto: "true"
   # Small, fixed-purpose control plane components - conservative limits consistent with every
   # other addon's values.yaml on this 3-node/32GB-per-node hardware, not battle-tested yet (no
   # Warehouses/Stages exist until the standalone website app is ready - see README.md).
