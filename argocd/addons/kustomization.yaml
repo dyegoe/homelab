@@ -20,3 +20,4 @@ resources:
   - loki.yaml
   - alloy.yaml
   - kargo.yaml
+  - argo-rollouts.yaml
