@@ -41,6 +41,8 @@ spec:
     # permit that resource kind for its own children, not just for the app's workload namespaces.
     - group: argoproj.io
       kind: Application
+    - group: argoproj.io
+      kind: Rollout
     - group: ""
       kind: ConfigMap
     - group: ""
@@ -49,6 +51,8 @@ spec:
       kind: ServiceAccount
     - group: ""
       kind: Service
+    - group: ""
+      kind: PersistentVolumeClaim
     - group: apps
       kind: Deployment
     - group: gateway.networking.k8s.io
@@ -57,5 +61,3 @@ spec:
       kind: ExternalSecret
     - group: kargo.akuity.io
       kind: "*"
-    - group: ""
-      kind: PersistentVolumeClaim
