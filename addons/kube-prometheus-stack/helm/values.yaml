@@ -179,7 +179,7 @@ grafana:
       # First bump (100m -> 300m) helped (75% -> 39%) but wasn't enough on its own.
       limits:
         cpu: 500m
-        memory: 128Mi
+        memory: 256Mi
   # Chart default is RollingUpdate, which starts the new pod before killing the old one - that
   # deadlocks against a single ReadWriteOnce Longhorn PVC (can't attach to two pods at once) and
   # gets Grafana stuck on every redeploy. Recreate avoids it at the cost of a few seconds downtime.
