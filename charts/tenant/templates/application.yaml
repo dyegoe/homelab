@@ -38,8 +38,7 @@ spec:
     # point traffic at the current ReplicaSet - git doesn't track that value, so without this
     # selfHeal would fight the Rollouts controller mid-rollout. See
     # https://argo-cd.readthedocs.io/en/stable/user-guide/diffing/#ignoring-rollouts-pod-template-hash-on-services
-    - group: ""
-      kind: Service
+    - kind: Service
       jsonPointers:
         - /spec/selector/rollouts-pod-template-hash
 {{- end }}
