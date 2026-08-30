@@ -19,5 +19,6 @@ resources:
   - kube-prometheus-stack.yaml
   - loki.yaml
   - alloy.yaml
+  - cloudnative-pg.yaml
   - kargo.yaml
   - argo-rollouts.yaml

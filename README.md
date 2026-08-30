@@ -576,6 +576,7 @@ effect, since the git generator only refreshes the _parameters_ it iterates over
 | `kube-prometheus-stack`         | `-1`      | yes       | After `longhorn` - Prometheus/Grafana persistence needs a working storage class                                                                                                  |
 | `loki`                          | `-1`      | yes       | Same storage dependency as above                                                                                                                                                 |
 | `alloy`                         | `0`       | yes       | Log shipping - pods via the Kubernetes API, Talos's own logs via a LoadBalancer Service                                                                                          |
+| `cloudnative-pg`                | `0`       | yes       | CloudNativePG Postgres operator (`cnpg-system` namespace) - webhook `caBundle` is self-managed by the operator at runtime, so it's excluded via `ignoreDifferences`              |
 | `kargo`                         | `1`       | yes       | Platform, plus one live app (website) provisioned via `charts/tenant` — see [Kargo](#kargo)                                                                                      |
 
 ### Renovate
