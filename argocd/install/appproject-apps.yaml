@@ -61,3 +61,5 @@ spec:
       kind: ExternalSecret
     - group: kargo.akuity.io
       kind: "*"
+    - group: postgresql.cnpg.io
+      kind: Cluster
