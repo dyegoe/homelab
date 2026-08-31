@@ -834,10 +834,9 @@ entirely — any other path requested on `maya.nodes.ee` falls through to the tu
 never reaches ArgoCD.
 
 **Webhook secret** — lives only in the live `argocd-secret` (key `webhook.github.secret`), never in
-git. Unlike the guest password's bcrypt hash in `patch-secret-argocd-secret.yaml` (safe to commit —
-one-way hash), this is a live plaintext value used to verify GitHub's HMAC signature, so it's
-patched directly, the same category as ArgoCD's own admin password/signing key which also never
-appear in the repo:
+git. This is a live plaintext value used to verify GitHub's HMAC signature, the same category as
+ArgoCD's own admin password/signing key which also never appear in the repo, so it's patched
+directly:
 
 ```bash
 WEBHOOK_SECRET=$(openssl rand -hex 20)
