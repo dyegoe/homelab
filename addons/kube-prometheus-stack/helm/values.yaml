@@ -8,7 +8,8 @@ crds:
 # right pods. BUT: as of writing, both still bind their metrics port to 127.0.0.1 (Talos's
 # default), so the Service can reach nothing and these targets will show as down until a
 # KubeControllerManagerConfig/KubeSchedulerConfig `extraArgs: bind-address: 0.0.0.0` patch is
-# added to talos/talconfig.yaml and applied. Left enabled since a down target is harmless.
+# added to talos/control-plane/ (see 04-kube-controller-manager.yaml, 05-kube-scheduler.yaml) and
+# applied. Left enabled since a down target is harmless.
 # etcd is a native Talos host service, not a Kubernetes pod, so it isn't scraped here.
 kubeEtcd:
   enabled: false

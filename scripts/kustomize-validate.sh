@@ -18,6 +18,6 @@ while IFS= read -r -d '' dir; do
     -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'; then
     status=1
   fi
-done < <(find . -name kustomization.yaml -not -path './talos/clusterconfig/*' -exec dirname {} \; | sort -u | tr '\n' '\0')
+done < <(find . -name kustomization.yaml -exec dirname {} \; | sort -u | tr '\n' '\0')
 
 exit "${status}"

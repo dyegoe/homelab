@@ -151,7 +151,7 @@ age-keygen -o $XDG_CONFIG_HOME/sops/age/keys.txt
 # The command above will output the public key, which you will need to add to the sops configuration file
 ```
 
-Now you can generate the TalOS config files by running the following command:
+Now you can generate the TalOS secrets by running the following command:
 
 ```bash
 # From this repository root
@@ -165,40 +165,43 @@ creation_rules:
       age1sse7e289gefyre7tdrv4g9hudldyypvhsvz23ph6t73zhd0uhf8sevp2v4
 EOF
 
-# Generate the TalOS secrets
-talhelper gensecret > talsecret.sops.yaml
+# Generate the TalOS secrets bundle (prompts for confirmation before generating a new one)
+topf secrets --confirm=false > secrets.yaml
 
 # Encrypt the TalOS secrets using sops
-sops -e -i talsecret.sops.yaml
-
-# Generate the TalOS config files
-talhelper genconfig
+sops -e -i secrets.yaml
 ```
 
-Now you can boot TalOS on each node from the USB stick and run the following command:
+Now you can boot TalOS on each node from the USB stick. `topf` detects maintenance-mode
+(insecure/unconfigured) nodes automatically — no `--insecure` flag needed — and folds config
+generation, apply, and cluster bootstrap into one step:
 
 ```bash
-talosctl apply-config --insecure --nodes 172.31.86.11 --file clusterconfig/k8s.nodes.ee-kihnu.nodes.ee.yaml
-talosctl apply-config --insecure --nodes 172.31.86.12 --file clusterconfig/k8s.nodes.ee-muhu.nodes.ee.yaml
-talosctl apply-config --insecure --nodes 172.31.86.13 --file clusterconfig/k8s.nodes.ee-ruhnu.nodes.ee.yaml
+topf apply --auto-bootstrap
 ```
 
-Copy TalOS config file to the `talosctl` config directory:
+Save a `talosconfig` for subsequent authenticated `talosctl` operations:
 
 ```bash
-cp clusterconfig/talosconfig ~/.talos/config
+topf talosconfig > talosconfig
+export TALOSCONFIG=$(pwd)/talosconfig
+# or: cp talosconfig ~/.talos/config
 ```
 
-Bootstrap the first node (kihnu.nodes.ee) and initialize the cluster:
+Generate an admin kubeconfig (valid 12 hours — regenerate as needed, or hand off to whatever
+longer-lived/GitOps-managed kubeconfig normally drives `kubectl` from here on):
+
+> **Why `topf`, not `talhelper`**: this cluster originally used
+> [`talhelper`](https://github.com/budimanjojo/talhelper) to generate Talos configs. It was archived
+> and abandoned upstream on 2026-08-26, and its pinned `v3.1.17` vendors a pre-release
+> `siderolabs/talos/pkg/machinery` missing an upstream fix — which generated `KubeEtcdEncryptionConfig`
+> with the wrong secretbox key name (`key1` instead of the historically-correct `key2`) during the
+> Talos v1.14.0 multi-doc config migration, breaking `kube-apiserver`'s ability to decrypt existing
+> etcd Secrets on one node until manually patched. `topf` depends on the released `machinery v1.14.0`
+> (fix included) and is actively maintained — see `ROADMAP.md`'s history for the migration.
 
 ```bash
-talosctl bootstrap -n 172.31.86.11
-```
-
-Copy the Kubeconfig file to your local machine:
-
-```bash
-talosctl kubeconfig ~/.kube/config -n 172.31.86.11
+topf kubeconfig > ~/.kube/config
 ```
 
 You can follow the cluster initialization progress by running the following commands:
@@ -1152,8 +1155,8 @@ Pod logs (every namespace, tailed by Alloy via the Kubernetes API — no `hostPa
 
 Available labels: `namespace`, `pod`, `container`, `node`, `job`, `service_name`.
 
-Talos's own logs (kernel + service, from all 3 nodes, shipped via `machine.logging.destinations` +
-`KmsgLogConfig` in `talos/talconfig.yaml`):
+Talos's own logs (kernel + service, from all 3 nodes, shipped via `machine.logging.destinations` in
+`talos/control-plane/01-base.yaml.tpl` + `KmsgLogConfig` in `talos/control-plane/06-kmsg-log.yaml`):
 
 ```logql
 {job="talos"}
@@ -1247,10 +1250,11 @@ Root cause, confirmed upstream in [kubernetes/kubernetes#134080](https://github.
 connection — harmless log churn, not an actual etcd/apiserver problem (cluster health is unaffected).
 Fixed by [kubernetes/kubernetes#138075](https://github.com/kubernetes/kubernetes/pull/138075), merged
 2026-04-22, targeting **Kubernetes v1.37**; a backport to 1.34-1.36 was discussed in the PR but not
-confirmed shipped as of this writing. This cluster runs `v1.36.2` (`kubernetesVersion` in
-`talos/talconfig.yaml`), so it isn't fixed yet.
+confirmed shipped as of this writing. This cluster was on `v1.36.2` when this entry was written; it
+has since been upgraded to `v1.37.0` (`kubernetesVersion` in `talos/topf.yaml`) but this entry has
+not yet been rechecked against that fix.
 
-**Recheck when**: `kubernetesVersion` in `talos/talconfig.yaml` is bumped past `1.36.2` — see if this
+**Recheck when**: `kubernetesVersion` in `talos/topf.yaml` is bumped past `1.36.2` — see if this
 noise disappears; if not, check whether the 1.34-1.36 backport of #138075 ever landed.
 
 ## Overall setup summary and sequence
@@ -1271,7 +1275,7 @@ noise disappears; if not, check whether the 1.34-1.36 backport of #138075 ever l
 14. Apply Longhorn via GitOps
 15. Apply Prometheus Operator CRDs, kube-prometheus-stack, Loki, and Alloy via GitOps (see
     [Observability](#observability))
-16. Patch `talos/talconfig.yaml` for `kube-scheduler`/`kube-controller-manager`
+16. Patch `talos/control-plane/` for `kube-scheduler`/`kube-controller-manager`
     `bind-address: 0.0.0.0` (needed for Prometheus to scrape them) and
     `machine.logging.destinations`/`KmsgLogConfig` (ships Talos's own logs to Alloy), then
-    `talhelper genconfig` and `talosctl apply-config`
+    `topf render` to review and `topf apply` to push it

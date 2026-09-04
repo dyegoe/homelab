@@ -1,0 +1,9 @@
+---
+apiVersion: v1alpha1
+kind: UnattendedInstallConfig
+$patch: delete # topf auto-generates this from schematicId/secureboot/talosVersion for Talos >=
+# 1.14, but with a placeholder diskSelector (disk.dev_path == "/dev/sda") since topf doesn't know
+# our disk. .machine.install and UnattendedInstallConfig are mutually exclusive on a single node,
+# so delete the auto-generated one and keep the legacy machine.install form (01-install-disk.yaml)
+# that's actually running on the cluster today. Revisit when adopting UnattendedInstallConfig
+# properly (see ROADMAP.md).

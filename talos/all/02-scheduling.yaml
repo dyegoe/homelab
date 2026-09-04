@@ -1,0 +1,10 @@
+---
+apiVersion: v1alpha1
+kind: KubeNodeConfig
+taints:
+  node-role.kubernetes.io/control-plane:
+    $patch: delete # allowSchedulingOnControlPlanes equivalent: talosctl gen config's default KubeNodeConfig
+    # taints control-plane nodes NoSchedule; the runtime NodeTaintSpecController applies KubeNodeConfig.taints
+    # verbatim with no check against allowSchedulingOnControlPlanes, so the taint must be deleted here, not
+    # suppressed via the legacy cluster.allowSchedulingOnControlPlanes field. All 3 nodes are control-plane
+    # with no workers, so leaving this taint in place would make the cluster fully unschedulable.

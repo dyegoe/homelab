@@ -1,0 +1,7 @@
+---
+apiVersion: v1alpha1
+kind: KubeletConfig
+$patch: delete # talosctl gen config auto-generates this, conflicting with the legacy machine.kubelet
+# block above (01-base.yaml). Kept in legacy form because KubeletConfig has no equivalent for
+# extraMounts (needed for Longhorn's /var/mnt/longhorn bind mount) — "Removed in multi-doc. No direct
+# equivalent," per topf's own talos-v114-migration skill mapping.

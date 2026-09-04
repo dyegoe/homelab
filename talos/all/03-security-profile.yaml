@@ -1,0 +1,8 @@
+---
+apiVersion: v1alpha1
+kind: SecurityProfileConfig
+workloadIsolation: false # talosctl gen config defaults this to true on fresh generation (sandboxd
+# workload isolation), but this cluster reached v1.14 via in-place `talosctl upgrade`, not a full config
+# regen, so it never had this enabled. Keep it off here to match current behavior; adopting it is a
+# separate, deliberate decision (see ROADMAP.md) — a documented failure mode exists for LUKS-encrypted
+# EPHEMERAL volumes failing to close on the first reboot after flipping this on.

@@ -1,0 +1,5 @@
+---
+apiVersion: v1alpha1
+kind: KmsgLogConfig
+name: talos-kernel-logs
+url: "tcp://172.31.100.2:5140/" # Alloy's alloy-talos-logs LoadBalancer Service - kernel/dmesg logs only, `machine.logging.destinations` above covers service logs

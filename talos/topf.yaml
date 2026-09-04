@@ -1,0 +1,22 @@
+---
+clusterName: k8s.nodes.ee
+clusterEndpoint: https://172.31.86.10:6443
+
+talosVersion: v1.14.0
+kubernetesVersion: v1.37.0
+
+schematicId: "@schematic.yaml"
+secureboot: true
+
+nodes:
+  - host: kihnu.nodes.ee
+    ip: 172.31.86.11
+    role: control-plane
+
+  - host: muhu.nodes.ee
+    ip: 172.31.86.12
+    role: control-plane
+
+  - host: ruhnu.nodes.ee
+    ip: 172.31.86.13
+    role: control-plane

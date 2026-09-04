@@ -15,34 +15,66 @@ from [Renovate](https://docs.renovatebot.com/) (see `renovate.json`).
 
 ## Architecture
 
-- `talos/talconfig.yaml` — the single source of truth for cluster topology, consumed by
-  [`talhelper`](https://github.com/budimanjojo/talhelper) to render per-node Talos machine configs.
-  It defines the cluster name/endpoint, the shared control-plane patch (disables the default CNI
-  in favor of Cilium, disables kube-proxy for strict kube-proxy-less mode, and configures a Talos
-  VIP), and the three physical nodes.
-- `talos/clusterconfig/` — generated output directory (gitignored, mode 700). Contains the
-  per-node YAML configs and `talosconfig` produced by `talhelper genconfig`. Never hand-edit files
-  here or commit them — regenerate from `talconfig.yaml` instead.
-- The cluster is a 3-node, all-control-plane (`allowSchedulingOnMasters: true`) topology on VLAN 86
-  (`172.31.86.0/24`), fronted by a Talos VIP at `172.31.86.10` for the Kubernetes API.
+- `talos/topf.yaml` — the single source of truth for cluster topology, consumed by
+  [`topf`](https://github.com/postfinance/topf) to render and apply per-node Talos machine configs.
+  Defines the cluster name/endpoint, Talos/Kubernetes versions, the image schematic reference
+  (`talos/schematic.yaml`, hashed locally into `schematicId`), and the three physical nodes
+  (`host`/`ip`/`role: control-plane`).
+- `talos/secrets.yaml` — SOPS-encrypted Talos secrets bundle (cluster CA/tokens/keys). Never
+  regenerate this for an existing cluster — it holds the cluster's actual cryptographic identity;
+  losing/replacing it breaks trust for every existing node, Secret, and credential.
+- `talos/all/`, `talos/control-plane/` — topf patch directories, one file per document, applied in
+  filename order (`01-`, `02-`, … prefixes control ordering). `all/` applies to every node,
+  `control-plane/` to control-plane-role nodes only (this cluster has no `worker/` — all 3 nodes are
+  control-plane). A `.tpl` suffix enables Go templating (`{{ .Node.Host }}`, `{{ .KubernetesVersion }}`,
+  etc.) — see `topf`'s own `configuration-model.md` docs for the full template context.
+  `$patch: delete` on a document (or a specific map key, e.g. one taint) removes something `topf`
+  auto-generates by default — used here for `UnattendedInstallConfig` (keeping the legacy
+  `machine.install` form, since the disk/image/wipe fields still work and this cluster predates the
+  newer typed doc) and `KubeletConfig` (keeping legacy `machine.kubelet`, since the typed doc has no
+  equivalent for `extraMounts`, needed for Longhorn's bind mount).
+- There is no generated-output directory to gitignore — `topf render -o <dir>` writes to whatever
+  directory you point it at (for local inspection only, never commit it), and `topf apply` talks to
+  the live nodes directly without an intermediate generated-file step.
+- The cluster is a 3-node, all-control-plane topology (no legacy `allowSchedulingOnMasters` field —
+  handled via `all/02-scheduling.yaml` deleting the default control-plane `NoSchedule` taint) on
+  VLAN 86 (`172.31.86.0/24`), fronted by a Talos VIP at `172.31.86.10` for the Kubernetes API.
 
 ## Common commands
 
-Run from the `talos/` directory:
+Run from the `talos/` directory. Per the mutating-actions rule below, `apply`/`upgrade` are for the
+user to run — Claude renders/dry-runs for review, never applies.
 
 ```bash
-# Regenerate per-node Talos configs from talconfig.yaml
-talhelper genconfig
+# Render machine configs locally for inspection (no cluster contact) — the day-to-day way to review
+# a patch change before applying it
+topf render -o /tmp/topf-check --redact=false
+
+# Preview what a real apply would change against the live cluster (read-only, never mutates)
+topf apply --dry-run --nodes-filter '<hostname>' --confirm=false
+
+# Apply a reviewed change to the live cluster (mutating — user runs this)
+topf apply --nodes-filter '<hostname>'
 ```
 
-Applying config to a freshly-booted (insecure) node:
+**Changing a config**: edit the relevant file under `all/`/`control-plane/` (or `topf.yaml` itself),
+`render` to inspect the generated output, `apply --dry-run` against the live cluster to confirm the
+diff is exactly what you expect, then `apply` for real. One node at a time for anything riskier than
+a label/log-destination tweak — this cluster's own migration surfaced real footguns (a taint that
+would have made every node unschedulable, a kubelet-config conflict) that only showed up in the
+`apply --dry-run` diff, not in a local `render`.
+
+Applying config to a freshly-booted (insecure/maintenance-mode) node — `topf` detects maintenance
+mode automatically, no `--insecure` flag needed:
 
 ```bash
-talosctl apply-config --insecure --nodes <node-ip> --file clusterconfig/k8s.nodes.ee-<hostname>.yaml
+topf apply --auto-bootstrap
 ```
 
-Use the generated `talosconfig` (copy to `~/.talos/config`) for subsequent authenticated
-`talosctl`/`kubectl` operations against the cluster.
+Use `topf talosconfig > talosconfig` (then `export TALOSCONFIG=$(pwd)/talosconfig`, or copy to
+`~/.talos/config`) for subsequent authenticated `talosctl` operations. `topf kubeconfig` generates a
+12-hour admin kubeconfig — fine for ad-hoc access, but not a substitute for whatever
+longer-lived/GitOps-managed kubeconfig normally drives `kubectl`.
 
 ## GitOps architecture
 
@@ -113,11 +145,11 @@ runs a command (checking pod/node status, logs, etc.) is always fine and encoura
   e.g. the `Observability` section's "Known log noise" entry tracks a `kube-apiserver`/etcd log-noise
   issue with an explicit recheck trigger (bump `kubernetesVersion` past a given version). Skim the
   relevant README section before starting related work, and proactively suggest rechecking a tracked
-  item when its trigger condition is met (e.g. a `kubernetesVersion` bump in `talconfig.yaml`) rather
+  item when its trigger condition is met (e.g. a `kubernetesVersion` bump in `topf.yaml`) rather
   than waiting to be asked. When closing out a similar investigation in the future, add a same-shaped
   entry (root cause, upstream link, explicit recheck trigger) instead of only reporting it in chat.
 - Node hardware/network details (hostnames, static IPs, disk device names) are documented in
-  README.md — keep `talconfig.yaml` and README.md in sync when nodes change.
+  README.md — keep `topf.yaml` and README.md in sync when nodes change.
 - `installDisk` per node is `/dev/nvme0n1`; verify this matches actual hardware before applying to
   a new/replaced node.
 - `origin` is `git@github.com:dyegoe/homelab.git`, branch `main`. ArgoCD's repo-access secret uses
