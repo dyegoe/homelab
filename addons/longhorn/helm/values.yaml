@@ -10,14 +10,18 @@ defaultSettings:
   # Automatically use the available space on /var/mnt/longhorn
   createDefaultDiskLabeledNodes: false
   defaultDataPath: /var/mnt/longhorn
-  defaultReplicaCount: 3
+  # 2, not 3, on purpose: this cluster only has 3 nodes, so 3 replicas leaves no
+  # spare node for Longhorn to relocate a replica onto during a node drain/evict
+  # (it can only double up on an already-occupied node via replicaSoftAntiAffinity
+  # instead). 2 replicas always has one genuinely free node to land on.
+  defaultReplicaCount: 2
   replicaSoftAntiAffinity: true
   storageMinimalAvailablePercentage: 10
   guaranteedInstanceManagerCPU: 12
   upgradeChecker: false
 persistence:
   defaultClass: true
-  defaultClassReplicaCount: 3
+  defaultClassReplicaCount: 2
   reclaimPolicy: Retain
 csi:
   kubeletRootDir: /var/lib/kubelet
