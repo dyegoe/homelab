@@ -1205,6 +1205,10 @@ CoreDNS, etc.) under **Dashboards**. Two known gaps, not bugs to chase if redisc
   series (`externalLabels` only affects federation/remote-write/Alertmanager metadata, not local
   queries) — accepted as a known gap rather than adding `metricRelabelings` to every `ServiceMonitor`
   across every addon.
+- etcd has no metrics or dashboard at all — it's a native Talos host service, not a Kubernetes workload,
+  so there's no pod/Service for a `ServiceMonitor` to target. Wiring it up would need Talos-level exposure
+  of etcd's metrics endpoint plus a scrape config, which hasn't been done. Accepted as a known gap, not
+  planned unless a concrete need for etcd visibility comes up.
 
 Every addon with a live Prometheus target also ships its own dashboard(s), as a `ConfigMap` labeled
 `grafana_dashboard: "1"` in `addons/<name>/dashboards/` (auto-discovered by Grafana's sidecar, which has
