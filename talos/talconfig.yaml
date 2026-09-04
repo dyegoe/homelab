@@ -57,6 +57,14 @@ controlPlane:
       kind: KmsgLogConfig
       name: talos-kernel-logs
       url: "tcp://172.31.100.2:5140/" # Alloy's alloy-talos-logs LoadBalancer Service - kernel/dmesg logs only, `machine.logging.destinations` above covers service logs
+    - |-
+      apiVersion: v1alpha1
+      kind: KubeEtcdEncryptionConfig
+      $$patch: delete # talhelper 3.1.17 auto-generates this with the wrong secretbox key name ("key1"); Talos's own
+      # generator hardcodes "key2" for secretbox specifically so a pre-1.14 cluster's existing etcd-encrypted Secrets
+      # stay decryptable after the multi-doc migration. Delete the buggy auto-generated one, replaced below with the
+      # correct name. https://github.com/budimanjojo/talhelper
+    - "@./patches/kube-etcd-encryption.sops.yaml"
 
 allowSchedulingOnMasters: true
 
