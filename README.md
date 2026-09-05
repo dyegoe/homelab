@@ -39,6 +39,7 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
     - [Alerting (Telegram)](#alerting-telegram)
     - [Metrics dashboards](#metrics-dashboards)
     - [Known log noise (recheck on next Kubernetes upgrade)](#known-log-noise-recheck-on-next-kubernetes-upgrade)
+    - [Known alert noise: KubeClientCertificateExpiration](#known-alert-noise-kubeclientcertificateexpiration)
   - [Overall setup summary and sequence](#overall-setup-summary-and-sequence)
 
 ## Pre-commit hooks
@@ -1284,6 +1285,29 @@ not yet been rechecked against that fix.
 
 **Recheck when**: `kubernetesVersion` in `talos/topf.yaml` is bumped past `1.36.2` — see if this
 noise disappears; if not, check whether the 1.34-1.36 backport of #138075 ever landed.
+
+### Known alert noise: KubeClientCertificateExpiration
+
+`KubeClientCertificateExpiration` (warning at <7d, critical at <24h) fires on all 3 control-plane
+`apiserver` instances. The rule takes the 1st percentile of the `apiserver_client_certificate_expiration_seconds`
+histogram per instance, which makes it sensitive to a handful of very short-lived client certs even
+when the vast majority of certs (~190k+ observed) aren't expiring for a year or more — checked via
+`apiserver_client_certificate_expiration_seconds_bucket`, where a small, growing count of requests
+(tens, not thousands) land in the `le="1800.0"` (30-minute) bucket with nothing filling the buckets
+between 30 minutes and 7 days, i.e. this isn't a cert gradually approaching real expiry.
+
+The alert started firing at `2026-09-05T07:25:53Z`, ~2 minutes after the KubeVirt addon
+(see [KubeVirt](#kubevirt)) came up. That addon registers 5 new aggregated `APIService`s
+(`v1`/`v1alpha3.subresources.kubevirt.io` → `virt-api`, `v1alpha1`/`v1beta1.subresources.template.kubevirt.io`
+→ `virt-template-api-service`, `v1beta1.upload.cdi.kubevirt.io` → `cdi-api`), and the timing/growth
+pattern is consistent with those extension API servers using short-lived, frequently-rotated client
+certificates for their delegated-auth calls back to `kube-apiserver` — a common pattern for
+aggregated API servers. Not fully confirmed (no audit logging enabled to inspect the certs' CN
+directly), but no other change landed around that timestamp.
+
+**Recheck when**: KubeVirt/CDI are upgraded (`addons/kubevirt/kustomization.yaml` release tags) — see
+if the alert's onset lines up with a cert-rotation behavior change; or if `KubeClientCertificateExpiration`
+starts firing on a node with no KubeVirt/CDI components, which would rule out this addon as the cause.
 
 ## Overall setup summary and sequence
 
