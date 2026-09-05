@@ -602,34 +602,10 @@ cluster itself. Not part of the cluster's core function — safe to delete and r
   `machine.kernel.modules` patch (verified via `talosctl read`/`talosctl list` before adding this
   addon).
 
-**Typical workflow** (all commands below are for the user to run, not GitOps-managed — these are
-scratch VMs, not tracked infrastructure):
-
-```bash
-# import a cloud image into a DataVolume (backed by Longhorn)
-cat <<EOF | kubectl apply -f -
-apiVersion: cdi.kubevirt.io/v1beta1
-kind: DataVolume
-metadata:
-  name: cka-node1-disk
-  namespace: kubevirt-study
-spec:
-  source:
-    http:
-      url: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
-  storage:
-    resources:
-      requests:
-        storage: 20Gi
-    storageClassName: longhorn
-EOF
-
-# create a VM from that disk, console in, install containerd + kubeadm, kubeadm init/join
-virtctl console cka-node1
-
-# tear down fast when done
-kubectl delete namespace kubevirt-study
-```
+See [`addons/kubevirt/study/README.md`](addons/kubevirt/study/README.md) for the full practice
+workflow: the `VirtualMachine`/`DataVolume` template, installing containerd/kubeadm/kubelet inside
+the VM, running `kubeadm init`/`join`, and tearing the whole `kubevirt-study` namespace down when
+done. Those VMs are scratch resources the user applies directly — not GitOps-managed.
 
 ### Renovate
 

@@ -1,0 +1,19 @@
+---
+# Template disk for one CKA-practice VM. Not applied by ArgoCD (kubevirt/kustomization.yaml does
+# not reference this file) - disposable, user-applied resource. See ./README.md.
+#
+# To create additional nodes, copy this file and replace every "cka-node1" with e.g. "cka-node2".
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata:
+  name: cka-node1-disk
+  namespace: kubevirt-study
+spec:
+  source:
+    http:
+      url: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+  storage:
+    resources:
+      requests:
+        storage: 20Gi
+    storageClassName: longhorn
