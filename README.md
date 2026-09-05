@@ -582,6 +582,54 @@ effect, since the git generator only refreshes the _parameters_ it iterates over
 | `alloy`                         | `0`       | yes       | Log shipping - pods via the Kubernetes API, Talos's own logs via a LoadBalancer Service                                                                                          |
 | `cloudnative-pg`                | `0`       | yes       | CloudNativePG Postgres operator (`cnpg-system` namespace) - webhook `caBundle` is self-managed by the operator at runtime, so it's excluded via `ignoreDifferences`              |
 | `kargo`                         | `1`       | yes       | Platform, plus one live app (website) provisioned via `charts/tenant` — see [Kargo](#kargo)                                                                                      |
+| `kubevirt`                      | `1`       | yes       | KubeVirt + CDI operators, sourced as remote-URL Kustomize resources — see [KubeVirt](#kubevirt)                                                                                  |
+
+### KubeVirt
+
+Study-only addon: runs real VMs on the cluster (via KVM — all 3 nodes have `/dev/kvm` and Intel VT-x)
+so `kubeadm init`/`join` can be practiced on genuine hosts, without touching the Talos-managed
+cluster itself. Not part of the cluster's core function — safe to delete and recreate at will.
+
+- `addons/kubevirt/kustomization.yaml` pulls the `kubevirt-operator.yaml` and `cdi-operator.yaml`
+  manifests directly from their upstream GitHub release URLs (pinned tags, same idea as
+  `gateway-crds`'s remote source, just via Kustomize remote resources instead of an ArgoCD source
+  block, since neither project publishes a Kustomize-friendly directory path) — plus two local files,
+  `kubevirt-cr.yaml` and `cdi-cr.yaml`, for the operators' own custom resources.
+- CDI's `scratchSpaceStorageClass` is set to `longhorn` — this cluster's existing default
+  StorageClass — instead of the upstream guide's `local-path-provisioner`, since Longhorn already
+  covers that role here.
+- No Talos machine-config changes were needed: `/dev/kvm` already exists on all 3 nodes without any
+  `machine.kernel.modules` patch (verified via `talosctl read`/`talosctl list` before adding this
+  addon).
+
+**Typical workflow** (all commands below are for the user to run, not GitOps-managed — these are
+scratch VMs, not tracked infrastructure):
+
+```bash
+# import a cloud image into a DataVolume (backed by Longhorn)
+cat <<EOF | kubectl apply -f -
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata:
+  name: cka-node1-disk
+  namespace: kubevirt-study
+spec:
+  source:
+    http:
+      url: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+  storage:
+    resources:
+      requests:
+        storage: 20Gi
+    storageClassName: longhorn
+EOF
+
+# create a VM from that disk, console in, install containerd + kubeadm, kubeadm init/join
+virtctl console cka-node1
+
+# tear down fast when done
+kubectl delete namespace kubevirt-study
+```
 
 ### Renovate
 
