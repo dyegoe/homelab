@@ -1302,12 +1302,24 @@ The alert started firing at `2026-09-05T07:25:53Z`, ~2 minutes after the KubeVir
 → `virt-template-api-service`, `v1beta1.upload.cdi.kubevirt.io` → `cdi-api`), and the timing/growth
 pattern is consistent with those extension API servers using short-lived, frequently-rotated client
 certificates for their delegated-auth calls back to `kube-apiserver` — a common pattern for
-aggregated API servers. Not fully confirmed (no audit logging enabled to inspect the certs' CN
-directly), but no other change landed around that timestamp.
+aggregated API servers.
+
+Confirmed directly: the `kubevirt-controller-certs` Secret (namespace `kubevirt`, managed by
+`virt-operator`) carries the annotation `kubevirt.io/duration: "&Duration{Duration:24h0m0s,}"` — KubeVirt
+runs its own internal PKI via `virt-operator` with a 24-hour cert lifetime for `virt-controller`,
+`virt-handler`, `virt-api`, etc., independently of cluster PKI/cert-manager. Every renewal of one of
+these certs briefly lands in the `apiserver_client_certificate_expiration_seconds` histogram's
+low buckets as it's presented through the aggregation layer, which is what the alert's p1-quantile
+rule picks up.
 
 **Recheck when**: KubeVirt/CDI are upgraded (`addons/kubevirt/kustomization.yaml` release tags) — see
 if the alert's onset lines up with a cert-rotation behavior change; or if `KubeClientCertificateExpiration`
 starts firing on a node with no KubeVirt/CDI components, which would rule out this addon as the cause.
+
+**Mitigation**: routed to the `"null"` Alertmanager receiver in
+`addons/kube-prometheus-stack/helm/values.yaml` (`alertmanager.config.route.routes`) so it no longer
+spams Telegram — it still fires and stays visible in Prometheus/Grafana alerting. Remove it from that
+matcher once the recheck above shows the underlying KubeVirt cert churn is gone.
 
 ## Overall setup summary and sequence
 
