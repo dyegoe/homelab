@@ -39,7 +39,6 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
     - [Alerting (Telegram)](#alerting-telegram)
     - [Metrics dashboards](#metrics-dashboards)
     - [Known log noise (recheck on next Kubernetes upgrade)](#known-log-noise-recheck-on-next-kubernetes-upgrade)
-    - [Known alert noise: KubeClientCertificateExpiration](#known-alert-noise-kubeclientcertificateexpiration)
   - [Overall setup summary and sequence](#overall-setup-summary-and-sequence)
 
 ## Pre-commit hooks
@@ -583,30 +582,6 @@ effect, since the git generator only refreshes the _parameters_ it iterates over
 | `alloy`                         | `0`       | yes       | Log shipping - pods via the Kubernetes API, Talos's own logs via a LoadBalancer Service                                                                                          |
 | `cloudnative-pg`                | `0`       | yes       | CloudNativePG Postgres operator (`cnpg-system` namespace) - webhook `caBundle` is self-managed by the operator at runtime, so it's excluded via `ignoreDifferences`              |
 | `kargo`                         | `1`       | yes       | Platform, plus one live app (website) provisioned via `charts/tenant` — see [Kargo](#kargo)                                                                                      |
-| `kubevirt`                      | `1`       | yes       | KubeVirt + CDI operators, sourced as remote-URL Kustomize resources — see [KubeVirt](#kubevirt)                                                                                  |
-
-### KubeVirt
-
-Study-only addon: runs real VMs on the cluster (via KVM — all 3 nodes have `/dev/kvm` and Intel VT-x)
-so `kubeadm init`/`join` can be practiced on genuine hosts, without touching the Talos-managed
-cluster itself. Not part of the cluster's core function — safe to delete and recreate at will.
-
-- `addons/kubevirt/kustomization.yaml` pulls the `kubevirt-operator.yaml` and `cdi-operator.yaml`
-  manifests directly from their upstream GitHub release URLs (pinned tags, same idea as
-  `gateway-crds`'s remote source, just via Kustomize remote resources instead of an ArgoCD source
-  block, since neither project publishes a Kustomize-friendly directory path) — plus two local files,
-  `kubevirt-cr.yaml` and `cdi-cr.yaml`, for the operators' own custom resources.
-- CDI's `scratchSpaceStorageClass` is set to `longhorn` — this cluster's existing default
-  StorageClass — instead of the upstream guide's `local-path-provisioner`, since Longhorn already
-  covers that role here.
-- No Talos machine-config changes were needed: `/dev/kvm` already exists on all 3 nodes without any
-  `machine.kernel.modules` patch (verified via `talosctl read`/`talosctl list` before adding this
-  addon).
-
-See [`addons/kubevirt/study/README.md`](addons/kubevirt/study/README.md) for the full practice
-workflow: the `VirtualMachine`/`DataVolume` template, installing containerd/kubeadm/kubelet inside
-the VM, running `kubeadm init`/`join`, and tearing the whole `kubevirt-study` namespace down when
-done. Those VMs are scratch resources the user applies directly — not GitOps-managed.
 
 ### Renovate
 
@@ -1285,41 +1260,6 @@ not yet been rechecked against that fix.
 
 **Recheck when**: `kubernetesVersion` in `talos/topf.yaml` is bumped past `1.36.2` — see if this
 noise disappears; if not, check whether the 1.34-1.36 backport of #138075 ever landed.
-
-### Known alert noise: KubeClientCertificateExpiration
-
-`KubeClientCertificateExpiration` (warning at <7d, critical at <24h) fires on all 3 control-plane
-`apiserver` instances. The rule takes the 1st percentile of the `apiserver_client_certificate_expiration_seconds`
-histogram per instance, which makes it sensitive to a handful of very short-lived client certs even
-when the vast majority of certs (~190k+ observed) aren't expiring for a year or more — checked via
-`apiserver_client_certificate_expiration_seconds_bucket`, where a small, growing count of requests
-(tens, not thousands) land in the `le="1800.0"` (30-minute) bucket with nothing filling the buckets
-between 30 minutes and 7 days, i.e. this isn't a cert gradually approaching real expiry.
-
-The alert started firing at `2026-09-05T07:25:53Z`, ~2 minutes after the KubeVirt addon
-(see [KubeVirt](#kubevirt)) came up. That addon registers 5 new aggregated `APIService`s
-(`v1`/`v1alpha3.subresources.kubevirt.io` → `virt-api`, `v1alpha1`/`v1beta1.subresources.template.kubevirt.io`
-→ `virt-template-api-service`, `v1beta1.upload.cdi.kubevirt.io` → `cdi-api`), and the timing/growth
-pattern is consistent with those extension API servers using short-lived, frequently-rotated client
-certificates for their delegated-auth calls back to `kube-apiserver` — a common pattern for
-aggregated API servers.
-
-Confirmed directly: the `kubevirt-controller-certs` Secret (namespace `kubevirt`, managed by
-`virt-operator`) carries the annotation `kubevirt.io/duration: "&Duration{Duration:24h0m0s,}"` — KubeVirt
-runs its own internal PKI via `virt-operator` with a 24-hour cert lifetime for `virt-controller`,
-`virt-handler`, `virt-api`, etc., independently of cluster PKI/cert-manager. Every renewal of one of
-these certs briefly lands in the `apiserver_client_certificate_expiration_seconds` histogram's
-low buckets as it's presented through the aggregation layer, which is what the alert's p1-quantile
-rule picks up.
-
-**Recheck when**: KubeVirt/CDI are upgraded (`addons/kubevirt/kustomization.yaml` release tags) — see
-if the alert's onset lines up with a cert-rotation behavior change; or if `KubeClientCertificateExpiration`
-starts firing on a node with no KubeVirt/CDI components, which would rule out this addon as the cause.
-
-**Mitigation**: routed to the `"null"` Alertmanager receiver in
-`addons/kube-prometheus-stack/helm/values.yaml` (`alertmanager.config.route.routes`) so it no longer
-spams Telegram — it still fires and stays visible in Prometheus/Grafana alerting. Remove it from that
-matcher once the recheck above shows the underlying KubeVirt cert churn is gone.
 
 ## Overall setup summary and sequence
 

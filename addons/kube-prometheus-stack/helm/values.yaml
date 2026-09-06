@@ -90,10 +90,6 @@ alertmanager:
   # receiver - both matchers must stay here explicitly, or that alert falls through to the top-level
   # `receiver: telegram` below and spams Telegram (confirmed live: InfoInhibitor's own description
   # says it should route to null, but only Watchdog was carried over here, so it didn't).
-  # KubeClientCertificateExpiration is muted the same way - it's confirmed false-positive noise from
-  # KubeVirt's own 24h-lived internal certs, not a real cluster PKI expiry; see README.md's
-  # "Known alert noise: KubeClientCertificateExpiration" section. Still visible/firing in
-  # Prometheus/Grafana alerting, just not pushed to Telegram.
   config:
     route:
       receiver: telegram
@@ -107,7 +103,7 @@ alertmanager:
       routes:
         - receiver: "null"
           matchers:
-            - alertname =~ "Watchdog|InfoInhibitor|KubeClientCertificateExpiration"
+            - alertname =~ "Watchdog|InfoInhibitor"
     receivers:
       - name: "null"
       - name: telegram

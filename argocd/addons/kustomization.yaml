@@ -22,4 +22,3 @@ resources:
   - cloudnative-pg.yaml
   - kargo.yaml
   - argo-rollouts.yaml
-  - kubevirt.yaml
