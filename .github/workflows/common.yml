@@ -1,0 +1,58 @@
+---
+# Runs the same pre-commit suite that gates local commits (see README: Development), so a PR - in
+# practice a Renovate version bump - can't merge with a manifest that fails kubeconform, a values
+# file that fails yamllint, or an unformatted README. The job id is the status-check context name
+# required by main's branch protection; renaming it means updating the protection rule too.
+name: Common
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-pull-request:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout commit
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+
+      # Hook environments (node for prettier/markdownlint, go for gitleaks/kubeconform) are built
+      # by pre-commit on first run - cache them keyed on the hook config so later runs skip that.
+      - name: Cache pre-commit environments
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      # kubeconform fetches Kubernetes + CRD JSON schemas over the network (scripts/kustomize-validate.sh);
+      # the cache dir is gitignored locally and restored here so a bump only fetches what changed.
+      - name: Cache kubeconform schemas
+        uses: actions/cache@v6
+        with:
+          path: .kubeconform-cache
+          key: kubeconform-${{ runner.os }}-${{ hashFiles('addons/**/*.yaml', 'argocd/**/*.yaml') }}
+          restore-keys: |
+            kubeconform-${{ runner.os }}-
+
+      - name: Install pre-commit
+        run: pip install pre-commit
+
+      # kubectl, go and node are preinstalled on ubuntu-latest, which is all the local hooks need.
+      - name: Run pre-commit on all files
+        run: pre-commit run --all-files --show-diff-on-failure --color=always

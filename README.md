@@ -1391,6 +1391,12 @@ Check everything now (useful right after cloning, or after pulling changes):
 pre-commit run --all-files
 ```
 
+The same command runs in CI on every pull request and push to `main`
+(`.github/workflows/common.yml`, job `check-pull-request`), and `main`'s branch protection requires
+that check to pass before a PR can merge — so a Renovate bump can't land with a manifest that fails
+`kubeconform` or values that fail `yamllint`. Admins can bypass the rule, which is how direct pushes
+to `main` still work.
+
 What's checked (`.pre-commit-config.yaml`):
 
 - General hygiene - trailing whitespace, end-of-file newlines, merge conflict markers, large files.
