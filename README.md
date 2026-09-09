@@ -1162,13 +1162,12 @@ cached client, but leaves the broken one and its memory behind — the restart i
 default route. Note the metric's namespace label for the `ExternalSecret` itself is
 `exported_namespace`; `namespace` is the scrape target's (`external-secrets`).
 
-**Upstream**: no matching issue in either repo as of 2026-09-09 — the closest
-([onepassword-sdk-go#208](https://github.com/1Password/onepassword-sdk-go/issues/208),
-[#209](https://github.com/1Password/onepassword-sdk-go/issues/209),
-[#280](https://github.com/1Password/onepassword-sdk-go/issues/280)) are about client lifecycle and
-memory, not a host-function panic corrupting the instance. Two things would fix this properly: the
-SDK not leaving the instance unusable after a recovered host panic, and/or ESO's provider dropping
-a cached client after an unrecoverable WASM error.
+**Upstream**: both filed 2026-09-09 —
+[1Password/onepassword-sdk-go#288](https://github.com/1Password/onepassword-sdk-go/issues/288) (the
+root cause: a recovered host-function panic leaves the WASM instance unusable) and
+[external-secrets/external-secrets#6941](https://github.com/external-secrets/external-secrets/issues/6941)
+(the provider never drops a cached client after an unrecoverable WASM error). Either fix alone would
+have bounded this to one failed reconcile.
 
 **Recheck when**: an ESO release bumps `github.com/1password/onepassword-sdk-go` past `v0.4.1` in
 `providers/v1/onepasswordsdk/go.mod` (Renovate's ESO PR is the trigger — check that file at the new
