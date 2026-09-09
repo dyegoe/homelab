@@ -1129,12 +1129,15 @@ wasm stack trace:
         op_extism_core.wasm.invoke() i32
 ```
 
-**Root cause**, from the controller's logs in Loki: at 04:35 UTC a transient CoreDNS `SERVFAIL` for
-`my.1password.com` hit the [1Password Go SDK](https://github.com/1Password/onepassword-sdk-go)
-(`v0.4.1`, pinned by ESO `v2.10.0`'s `providers/v1/onepasswordsdk/go.mod`) inside its
-`extism`/`wazero` WASM host call. The resulting Go panic was "recovered by wazero", but the WASM
-instance's heap was left corrupted — 24 seconds later the first `out of bounds memory access`
-appeared, and every SDK call since failed the same way at memory allocation. ESO's
+**Root cause**, from the controller's logs in Loki: between 05:15:29 and 05:15:53 UTC CoreDNS
+returned `SERVFAIL` for `my.1password.com` (a sub-minute resolver blip, visible in CoreDNS's own logs
+for other external names too), and all 20 `ExternalSecret`s happened to refresh inside that window.
+Each failed lookup surfaced inside the
+[1Password Go SDK](https://github.com/1Password/onepassword-sdk-go) (`v0.4.1`, pinned by ESO
+`v2.10.0`'s `providers/v1/onepasswordsdk/go.mod`) as a Go panic in its `extism`/`wazero` WASM host
+call, "recovered by wazero". The very next call, 40 ms after the last of those, failed with
+`out of bounds memory access` at memory allocation, and every SDK call since failed the same way —
+the recovered panics evidently left the WASM instance's heap corrupted. ESO's
 `onepasswordsdk` provider caches the SDK client, keyed on the `ClusterSecretStore`'s
 `resourceVersion`, and never recreates it on error, so the wedged instance was reused until the pod
 was restarted. The controller also has no liveness probe and no memory limit, so nothing self-healed;
