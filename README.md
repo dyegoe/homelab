@@ -1,16 +1,78 @@
 # Homelab
 
-This is a repository to setup a homelab running Kubernetes on top of TalOS.
+A three-node bare-metal Kubernetes cluster on [Talos Linux](https://www.talos.dev/), managed end to
+end from this repository: the Talos machine configs, every cluster addon, and multi-environment
+promotion for the applications it hosts. After the one-time bootstrap, a cluster change is a git
+commit — Talos machine-config changes are the main thing still pushed from a workstation
+(`topf apply`), and those come from files in this repo too.
+
+I run it to learn, and to have somewhere real to break things. It hosts my personal website and a
+couple of side projects, and this README doubles as the runbook I actually operate from, so it is
+long and specific on purpose: incidents, gotchas, and the reasoning behind each decision are
+written down next to the thing they apply to.
+
+## Stack at a glance
+
+| Layer         | What                                                                                             | Notes                                                                                                                                                    |
+| ------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OS            | Talos Linux, SecureBoot, all three nodes control-plane                                           | Machine configs rendered and applied with [`topf`](https://github.com/postfinance/topf) from `talos/topf.yaml`; the secrets bundle is SOPS/age-encrypted |
+| Networking    | Cilium (kube-proxy replacement, native routing), Gateway API, BGP peering with a Mikrotik router | LoadBalancer IPs are advertised over BGP, not L2                                                                                                         |
+| GitOps        | ArgoCD (self-managed), App-of-Apps for addons, ApplicationSet + `charts/tenant` for hosted apps  | [Renovate](https://docs.renovatebot.com/) opens the version-bump PRs                                                                                     |
+| Delivery      | Kargo + Argo Rollouts                                                                            | Warehouse → `dev` (automatic) → `prd` (manual approval), provisioned per app from one `config.json`                                                      |
+| Secrets       | External Secrets Operator backed by 1Password; Sealed Secrets for the single bootstrap token     | Reloader restarts consumers on rotation                                                                                                                  |
+| Edge          | cert-manager (Let's Encrypt, Cloudflare DNS-01), external-dns, Cloudflare Tunnel                 | Internal services share one wildcard cert, terminated at the Gateway                                                                                     |
+| Storage       | Longhorn, CloudNativePG                                                                          |                                                                                                                                                          |
+| Observability | kube-prometheus-stack, Loki, Alloy (pod logs + Talos host logs), Alertmanager → Telegram         | Addons with a live Prometheus target ship their own Grafana dashboard as a `ConfigMap`                                                                   |
+
+Versions are pinned where ArgoCD and `topf` read them (`argocd/addons/*.yaml`,
+`argocd/install/kustomization.yaml`, `talos/topf.yaml`), not repeated here — Renovate keeps those
+moving, and a version table in a README only rots.
+
+## Worth reading
+
+If you are here to see how things are done rather than to operate the cluster, start with:
+
+- [GitOps](#gitops) — why Helm values are always files and never `--set` flags: the incident that
+  made it a rule, and how the same structure is what makes Renovate's PRs reviewable.
+- [Bootstrap (from zero)](#bootstrap-from-zero) — the imperative day-0 minimum, and the handover
+  after which nothing is applied by hand again.
+- [Kargo](#kargo) and the [gotchas accumulated building the first app](#adding-a-new-standalone-app-via-kargo)
+  — real multi-environment promotion, including the failures that only showed up live: a CI
+  feedback loop, a health check that flipped Stages unhealthy, and an RBAC watch that could never
+  succeed.
+- [External Secrets Operator](#external-secrets-operator) — the migration off the 1Password
+  Operator, and the silent-field gotcha that took ArgoCD's own repo access down mid-migration.
+- [Observability](#observability) — the CRD split that avoids a sync-order deadlock, and which
+  upstream dashboards were rebuilt rather than ported, and why.
+- [Known log noise](#known-log-noise-resolved-in-kubernetes-v137) (closed) and the
+  [ESO known issue](#known-issue-sdk-wasm-instance-wedges-after-a-network-error-recheck-when-onepassword-sdk-go-moves-past-v041)
+  (open) — tracked issues with an explicit recheck trigger, the pattern this repo uses for deferred
+  items.
+
+## Repository layout
+
+```text
+talos/            # topf topology (topf.yaml), image schematic, SOPS-encrypted secrets, per-node patches
+argocd/           # ArgoCD bootstrap: its own install, the addon App-of-Apps, the tenant ApplicationSet
+addons/<name>/    # one directory per addon: helm/values.yaml, extra manifests, Grafana dashboards
+apps/<name>/      # one config.json per hosted application, consumed by charts/tenant
+charts/tenant/    # Helm chart provisioning a tenant app: ArgoCD Applications + Kargo Project/Warehouse/Stages
+scripts/          # pre-commit helper (kustomize build + kubeconform validation)
+renovate.json     # automated version bumps for charts, images, and the ArgoCD install tag
+ROADMAP.md        # deferred and considered changes
+```
 
 ## Table of Contents
 
 - [Homelab](#homelab)
+  - [Stack at a glance](#stack-at-a-glance)
+  - [Worth reading](#worth-reading)
+  - [Repository layout](#repository-layout)
   - [Table of Contents](#table-of-contents)
-  - [Pre-commit hooks](#pre-commit-hooks)
   - [Initial Cluster Setup](#initial-cluster-setup)
     - [Hardware Specifications](#hardware-specifications)
     - [Network configuration](#network-configuration)
-    - [TalOS installation](#talos-installation)
+    - [Talos Linux installation](#talos-linux-installation)
     - [Network CNI](#network-cni)
   - [GitOps](#gitops)
     - [Architecture](#architecture)
@@ -32,41 +94,16 @@ This is a repository to setup a homelab running Kubernetes on top of TalOS.
     - [Known gotcha: URLs, Notes, and Sections aren't extracted](#known-gotcha-urls-notes-and-sections-arent-extracted)
     - [Creating a docker-registry (imagePullSecret) item](#creating-a-docker-registry-imagepullsecret-item)
     - [Migrating a bootstrap secret to External Secrets Operator](#migrating-a-bootstrap-secret-to-external-secrets-operator)
+    - [Known issue: SDK WASM instance wedges after a network error (recheck when onepassword-sdk-go moves past v0.4.1)](#known-issue-sdk-wasm-instance-wedges-after-a-network-error-recheck-when-onepassword-sdk-go-moves-past-v041)
   - [Observability](#observability)
     - [Architecture](#architecture-1)
     - [Accessing Grafana](#accessing-grafana)
     - [Viewing logs](#viewing-logs)
     - [Alerting (Telegram)](#alerting-telegram)
     - [Metrics dashboards](#metrics-dashboards)
-    - [Known log noise (recheck on next Kubernetes upgrade)](#known-log-noise-recheck-on-next-kubernetes-upgrade)
-  - [Overall setup summary and sequence](#overall-setup-summary-and-sequence)
-
-## Pre-commit hooks
-
-This repo uses [pre-commit](https://pre-commit.com/) to catch formatting/lint/schema issues before they
-land - install once per clone, then it runs automatically on every commit:
-
-```bash
-pre-commit install
-```
-
-Check everything now (useful right after cloning, or after pulling changes):
-
-```bash
-pre-commit run --all-files
-```
-
-What's checked (`.pre-commit-config.yaml`):
-
-- General hygiene - trailing whitespace, end-of-file newlines, merge conflict markers, large files.
-- YAML - syntax (`check-yaml`) and style (`yamllint`, config in `.yamllint.yaml`).
-- Markdown - auto-formatted with `prettier` (table alignment, etc.), then linted with
-  `markdownlint-cli2` (config in `.markdownlint-cli2.yaml`).
-- Secrets - `gitleaks` scans staged changes for accidentally committed credentials.
-- Kubernetes manifests - every `kustomization.yaml` in the repo gets built (`kubectl kustomize`) and
-  validated against the Kubernetes API + CRD schemas with `kubeconform`
-  (`scripts/kustomize-validate.sh`). Needs network access (schema/CRD lookups); results are cached in
-  `.kubeconform-cache/` (gitignored) after the first run.
+    - [Known log noise (resolved in Kubernetes v1.37)](#known-log-noise-resolved-in-kubernetes-v137)
+  - [Bootstrap sequence summary](#bootstrap-sequence-summary)
+  - [Development (pre-commit hooks)](#development-pre-commit-hooks)
 
 ## Initial Cluster Setup
 
@@ -77,15 +114,15 @@ What's checked (`.pre-commit-config.yaml`):
 - `kihnu.nodes.ee`: HP EliteDesk 800 G2
   - CPU: i5-6500 4 CPUs @ 3.20GHz
   - RAM: 32 GB
-  - SATA SSD: 1 TB (nvme0n1) SAMSUNG MZVLB1T0HALR-000H2
+  - NVMe SSD: 1 TB (`/dev/nvme0n1`) SAMSUNG MZVLB1T0HALR-000H2
 - `muhu.nodes.ee`: HP EliteDesk 800 G2
   - CPU: i5-6500T 4 CPUs @ 2.50GHz
   - RAM: 32 GB
-  - SATA SSD: 1 TB (nvme0n1) SAMSUNG MZVLB1T0HALR-000H2
+  - NVMe SSD: 1 TB (`/dev/nvme0n1`) SAMSUNG MZVLB1T0HALR-000H2
 - `ruhnu.nodes.ee`: Lenovo ThinkCentre M910q
   - CPU: i5-6500T 4 CPUs @ 2.50GHz
   - RAM: 32 GB
-  - NVMe SSD: 1 TB (nvme01) KINGSTON SNV2S1000G
+  - NVMe SSD: 1 TB (`/dev/nvme0n1`) KINGSTON SNV2S1000G
 
 ### Network configuration
 
@@ -100,79 +137,47 @@ What's checked (`.pre-commit-config.yaml`):
   - 172.31.86.13 (ruhnu.nodes.ee)
 - Cilium BGP peering with Mikrotik router — see [Advanced Networking](#advanced-networking)
 
-### TalOS installation
+### Talos Linux installation
 
-Visit [TalOS Image factory](https://factory.talos.dev/) (v1.3.3, latest at the time of writing) and select the following options:
+The installer image comes from the [Talos Image Factory](https://factory.talos.dev/), built from
+`talos/schematic.yaml`: bare-metal, `amd64`, SecureBoot, plus the `siderolabs/iscsi-tools` and
+`siderolabs/util-linux-tools` system extensions Longhorn needs. `topf` hashes that file into the
+schematic ID itself (`schematicId: "@schematic.yaml"` in `talos/topf.yaml`), so the ID never has to
+be copied around by hand; the Talos release to pair it with is `talosVersion` in the same file.
 
-1. **Platform**: bare-metal
-2. **Version**: 1.13.9 (latest at the time of writing)
-3. **Architecture**: amd64, turn secure boot on
-4. **System extensions**: siderolabs/iscsi-tools, siderolabs/util-linux-tools
-5. **Customization**: let as it is
-
-Important outputs:
-
-- Schematic Ready
-  - Your image schematic ID is: 613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245
-- SecureBoot ISO
-  - [https://factory.talos.dev/image/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245/v1.13.9/metal-amd64-secureboot.iso]
-- Initial Installation
-  - `factory.talos.dev/metal-installer-secureboot/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245:v1.13.9`
-- Upgrading Talos Linux
-  - `factory.talos.dev/metal-installer-secureboot/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245:v1.13.9`
-
-Download the SecureBoot ISO and "burn" it to a USB stick.
+To get a bootable installer, open the factory, choose the same options (platform `bare-metal`, the
+`talosVersion` from `topf.yaml`, `amd64` with SecureBoot on, the two extensions above), and download
+the SecureBoot ISO. Write it to a USB stick:
 
 ```bash
-sudo dd if=/home/dyego/Downloads/metal-amd64-secureboot.iso of=/dev/sda bs=4M status=progress && sync
+sudo dd if=metal-amd64-secureboot.iso of=/dev/sdX bs=4M status=progress && sync
 ```
 
-To generate the proper TalOS config files, you need to install `talosctl` on your local machine. You can do this by running the following command:
+Workstation tooling: [`talosctl`](https://www.talos.dev/latest/introduction/getting-started/)
+(`curl -sL https://talos.dev/install | sudo sh`), [`topf`](https://github.com/postfinance/topf),
+[`age`](https://github.com/FiloSottile/age), and [`sops`](https://github.com/getsops/sops/releases).
+
+`talos/.sops.yaml` is tracked and carries the age **public** key `talos/secrets.yaml` is encrypted
+to. The matching private key lives only in `$XDG_CONFIG_HOME/sops/age/keys.txt` on the operator's
+workstation — back it up: without it `secrets.yaml` can't be decrypted and no further machine
+configs can be rendered for this cluster. When forking this repo for a cluster of your own, generate
+a new key pair and swap the recipient in `.sops.yaml` before generating secrets:
 
 ```bash
-curl -sL https://talos.dev/install | sudo sh
-```
-
-Ensure that you have `age` installed on your local machine. You can install it by running the following command:
-
-```bash
-sudo dnf install age -y
-```
-
-You also need to install `sops` on your local machine. You can download the latest release from the [sops GitHub releases page](https://github.com/getsops/sops/releases)
-
-```bash
-# Create sops configuration dir to store the age key
 mkdir -p $XDG_CONFIG_HOME/sops/age
-
-# Generate an age key pair
-age-keygen -o $XDG_CONFIG_HOME/sops/age/keys.txt
-
-# The command above will output the public key, which you will need to add to the sops configuration file
+age-keygen -o $XDG_CONFIG_HOME/sops/age/keys.txt   # prints the public key - put it in talos/.sops.yaml
 ```
 
-Now you can generate the TalOS secrets by running the following command:
+Generate and encrypt the secrets bundle **once per cluster**. Never regenerate it for an existing
+cluster: it holds the cluster CA and the tokens every node, Secret, and credential trusts.
 
 ```bash
-# From this repository root
 cd talos
-
-# Create .sops.yaml file with the age public key
-cat <<EOF > .sops.yaml
----
-creation_rules:
-  - age: >-
-      age1sse7e289gefyre7tdrv4g9hudldyypvhsvz23ph6t73zhd0uhf8sevp2v4
-EOF
-
-# Generate the TalOS secrets bundle (prompts for confirmation before generating a new one)
-topf secrets --confirm=false > secrets.yaml
-
-# Encrypt the TalOS secrets using sops
+topf secrets --confirm=false > secrets.yaml   # prompts before overwriting an existing bundle
 sops -e -i secrets.yaml
 ```
 
-Now you can boot TalOS on each node from the USB stick. `topf` detects maintenance-mode
+Now you can boot Talos on each node from the USB stick. `topf` detects maintenance-mode
 (insecure/unconfigured) nodes automatically — no `--insecure` flag needed — and folds config
 generation, apply, and cluster bootstrap into one step:
 
@@ -191,6 +196,10 @@ export TALOSCONFIG=$(pwd)/talosconfig
 Generate an admin kubeconfig (valid 12 hours — regenerate as needed, or hand off to whatever
 longer-lived/GitOps-managed kubeconfig normally drives `kubectl` from here on):
 
+```bash
+topf kubeconfig > ~/.kube/config
+```
+
 > **Why `topf`, not `talhelper`**: this cluster originally used
 > [`talhelper`](https://github.com/budimanjojo/talhelper) to generate Talos configs. It was archived
 > and abandoned upstream on 2026-08-26, and its pinned `v3.1.17` vendors a pre-release
@@ -199,10 +208,6 @@ longer-lived/GitOps-managed kubeconfig normally drives `kubectl` from here on):
 > Talos v1.14.0 multi-doc config migration, breaking `kube-apiserver`'s ability to decrypt existing
 > etcd Secrets on one node until manually patched. `topf` depends on the released `machinery v1.14.0`
 > (fix included) and is actively maintained — see `ROADMAP.md`'s history for the migration.
-
-```bash
-topf kubeconfig > ~/.kube/config
-```
 
 You can follow the cluster initialization progress by running the following commands:
 
@@ -222,54 +227,43 @@ kubectl get nodes
 
 ### Network CNI
 
-As you can see, the cluster is up and running. Now we need to install a CNI plugin. In this case, we will use Cilium.
+Talos comes up with no CNI here — `talos/control-plane/02-kubeflannel-delete.yaml` removes the
+default Flannel and `03-kubeproxy.yaml` disables kube-proxy, since Cilium replaces both — so nodes
+stay `NotReady` until Cilium is installed. ArgoCD can't do that first install: its own pods need a
+working pod network. Cilium is therefore the one addon that gets an imperative first install, which
+ArgoCD then adopts once it is running (see
+[Adopting existing (non-GitOps) resources](#adopting-existing-non-gitops-resources)).
 
-We are going to install it via Helm.
+Install it from the **same values file ArgoCD will use**, `addons/cilium/helm/values.yaml`, at the
+chart version pinned in `argocd/addons/cilium.yaml` — never from a hand-typed list of `--set`
+flags; the [GitOps](#gitops) section explains the incident behind that rule. The only overrides are
+the four `ServiceMonitor` toggles: those CRDs don't exist until `prometheus-operator-crds` syncs,
+so the chart would fail to apply them on a fresh cluster. ArgoCD switches them back on when it
+adopts the release.
 
 ```bash
-# Add the Cilium Helm repository
-helm repo add cilium https://helm.cilium.io/
+# Gateway API CRDs first - Cilium's Gateway API support needs them present at install time.
+GATEWAY_API_TAG=$(grep -m1 targetRevision argocd/addons/gateway-crds.yaml | awk '{print $2}')
+kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_API_TAG}/experimental-install.yaml
 
-# Update the Helm repository
-helm repo update
-
-# Check the latest version of Cilium
-helm search repo cilium
-
-# Since we will use Gateway API, we need to install the CRDs first
-kubectl apply --server-side=true  -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.1/experimental-install.yaml
-
-# Install Cilium via Helm
+# Cilium, from the repo's values file at the pinned chart version.
+CILIUM_VERSION=$(grep -m1 targetRevision argocd/addons/cilium.yaml | awk '{print $2}')
+helm repo add cilium https://helm.cilium.io/ && helm repo update
 helm install cilium cilium/cilium \
-  --version 1.20.0 \
   --namespace kube-system \
-  --set kubeProxyReplacement=true \
-  --set k8sServiceHost=172.31.86.10 \
-  --set k8sServicePort=6443 \
-  --set routingMode=native \
-  --set ipv4NativeRoutingCIDR=10.0.0.0/8 \
-  --set autoDirectNodeRoutes=true \
-  --set endpointRoutes.enabled=true \
-  --set bpf.masquerade=true \
-  --set bpf.monitorAggregation=none \
-  --set socketLB.enabled=true \
-  --set cgroup.autoMount.enabled=false \
-  --set cgroup.hostRoot=/sys/fs/cgroup \
-  --set securityContext.privileged=true \
-  --set ipam.mode=kubernetes \
-  --set gatewayAPI.enabled=true \
-  --set gatewayAPI.enableAlpn=true \
-  --set bgpControlPlane.enabled=true \
-  --set hubble.enabled=true \
-  --set hubble.relay.enabled=true \
-  --set hubble.ui.enabled=true \
-  --set hubble.metrics.enabled="{dns,drop,flow,flows-to-world,httpV2,icmp,port-distribution,tcp}"
+  --version "${CILIUM_VERSION}" \
+  -f addons/cilium/helm/values.yaml \
+  --set prometheus.serviceMonitor.enabled=false \
+  --set envoy.prometheus.serviceMonitor.enabled=false \
+  --set operator.prometheus.serviceMonitor.enabled=false \
+  --set hubble.metrics.serviceMonitor.enabled=false
 
-# Check Cilium status
 cilium status --wait
 ```
 
-For BGP configuration, refer to the [Advanced Networking](#advanced-networking) section below.
+BGP peering with the router, the LoadBalancer IP pool, and the Hubble UI route are plain manifests
+under `addons/cilium/` and arrive with the `cilium` `Application` — see
+[Advanced Networking](#advanced-networking).
 
 ## GitOps
 
@@ -287,10 +281,12 @@ Principles:
   no per-cluster variance) to expand, just a fixed list a human edits.
 - **ApplicationSet** (`argocd/apps-applicationset/applicationset.yaml`, kept in sync from git by
   the `apps-applicationset` `Application` that wraps it — see the table below) for standalone
-  hosted apps (e.g. the personal website) — each app gets one `Application` per environment,
-  generated from an `{app} x {env}` matrix. This _is_ the dynamic-expansion case ApplicationSet is
-  for: every app needs the same `dev`/`prd` shape, and Kargo promotes Freight between the generated
-  `Application`s — see [Standalone apps (ApplicationSet)](#standalone-apps-applicationset) below.
+  hosted apps (the personal website, a couple of side projects). Its git generator turns each
+  `apps/<name>/config.json` into one `Application` that installs `charts/tenant`, which in turn
+  renders the app's `dev`/`prd` `Application`s plus its Kargo Project/Warehouse/Stages. This _is_
+  the dynamic-expansion case ApplicationSet is for: every app needs the same shape, and Kargo
+  promotes Freight between the generated `Application`s — see
+  [Standalone apps (ApplicationSet)](#standalone-apps-applicationset) below.
 - Helm values live in `addons/<app>/helm/values.yaml` — real, standalone YAML — rather than inlined
   as `valuesObject` in the `Application` CRD. Both are equally visible in `git diff`/PR review,
   since the `Application` object is itself git-tracked; the actual hard requirement is **never** a
@@ -317,7 +313,7 @@ argocd/
 ├── apps-applicationset.yaml  # Application: self-syncs apps-applicationset/ below
 ├── apps-applicationset/
 │   ├── kustomization.yaml
-│   └── applicationset.yaml  # ApplicationSet: generates one Application per app x env
+│   └── applicationset.yaml  # ApplicationSet: one charts/tenant Application per apps/*/config.json
 └── addons/
     ├── kustomization.yaml   # lists every addon Application
     ├── cilium.yaml          # Application: Cilium (multi-source: Helm chart + this repo's values)
@@ -329,8 +325,11 @@ addons/
         └── values.yaml      # Cilium Helm values (source of truth, never inlined)
 
 apps/
-└── website/                 # one dir per standalone app, matching the ApplicationSet's `app` element
-    └── config.json           # {"app": "website", "repoURL": "..."} - discovered by the git generator
+└── website/                 # one dir per standalone app
+    └── config.json          # appName/repoURL/imageURL/onepassword.* - charts/tenant's values, found by the git generator
+
+charts/
+└── tenant/                  # Helm chart: <app>-dev/<app>-prd Applications + Kargo Project/Warehouse/Stages
 ```
 
 Each addon gets an `addons/<app>/helm/values.yaml` — one `helm/` subdirectory per app. That leaves
@@ -365,7 +364,8 @@ commit, not a `kubectl`/`helm` command.
 
 `apps-applicationset` in turn manages one `ApplicationSet` named `apps`
 (`argocd/apps-applicationset/applicationset.yaml`), which generates one `Application` per
-standalone app x env (e.g. `website-dev`, `website-prd`) — see
+standalone app (`website`, `helloworld`, ...) — the outer, `charts/tenant`-sourced one that renders
+that app's `-dev`/`-prd` pair — see
 [Standalone apps (ApplicationSet)](#standalone-apps-applicationset) below. This wrapper exists
 because the `ApplicationSet`'s **git generator** only refreshes the _parameters_ it iterates over
 (new `apps/*/config.json` files) — the generator polls GitHub on its own. The `ApplicationSet`'s
@@ -415,8 +415,9 @@ kubectl -n argocd create secret generic repo-homelab \
   --from-literal=password=$(op item get "homelab-gh-pat-argocd-homelab" --fields password --reveal)
 kubectl -n argocd label secret repo-homelab argocd.argoproj.io/secret-type=repository
 
-# Install ArgoCD (pin the version — check https://github.com/argoproj/argo-cd/releases for latest)
-kubectl -n argocd apply -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.0/manifests/install.yaml --server-side --force-conflicts
+# Install ArgoCD at the tag pinned in argocd/install/kustomization.yaml (Renovate keeps that pin current)
+ARGOCD_TAG=$(grep -o 'argo-cd/v[0-9.]*' argocd/install/kustomization.yaml | cut -d/ -f2)
+kubectl -n argocd apply -f https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_TAG}/manifests/install.yaml --server-side --force-conflicts
 kubectl -n argocd rollout status deployment argocd-server
 
 # Initial admin password — delete the argocd-initial-admin-secret once access/SSO is confirmed
@@ -524,36 +525,38 @@ diagnose, because nothing rendered a reviewable diff before it reached the clust
 
 ### Standalone apps (ApplicationSet)
 
-`argocd/apps-applicationset/applicationset.yaml` is an `ApplicationSet` named `apps`, using a
-**matrix generator** that cross-joins two very different kinds of generator:
+`argocd/apps-applicationset/applicationset.yaml` is an `ApplicationSet` named `apps` with a single
+Git **`files`** generator globbing `apps/*/config.json`. Each matching file becomes one set of
+template parameters, so apps are discovered from the repo tree instead of being hardcoded in the
+`ApplicationSet` — adding an app never means editing it.
 
-- A `list` generator with two fixed elements, `env: dev` and `env: prd`. `env` is a platform
-  concept, not a per-app one — every app gets the same two environments, and a `list` generator can
-  only ever emit exactly these two values, so there's nothing to validate.
-- A Git **`files`** generator globbing `apps/*/config.json`. Each matching file becomes one set of
-  template parameters (`app`, `repoURL`), so apps are discovered from the repo tree instead of being
-  hardcoded in the `ApplicationSet` — adding an app never means editing it.
+Each generated `Application` is named after the app (`website`, `helloworld`, ...) and installs
+**`charts/tenant`** from this repo, passing the `config.json` contents through as Helm values. That
+chart is where the per-environment shape lives: it renders the `<app>-dev`/`<app>-prd` ArgoCD
+`Application`s (each sourced from `deploy/overlays/<env>` in the app's own repo — this repo owns no
+manifests on the app's behalf), the Kargo `Project`/`Warehouse`/`Stage`s that promote between them,
+and the `ExternalSecret`s for the credentials involved. Environments are a platform concept, fixed
+to `dev` and `prd` inside the chart, not something an app chooses.
+`kargo.akuity.io/authorized-stage` on each per-env `Application` delegates its sync authority to
+the matching Kargo `Stage` — see [Kargo](#kargo).
 
-`matrix` produces one generated `Application` per `{app, env}` pair (`website-dev`, `website-prd`,
-...), sourced entirely from the app's own repo (`deploy/overlays/{{.env}}`) — this repo owns no
-plain manifests on the app's behalf. `kargo.akuity.io/authorized-stage` on each generated
-`Application` delegates its sync authority to Kargo's matching `dev`/`prd` `Stage`, provisioned by
-`charts/tenant` — see [Kargo](#kargo).
+Two deliberate deviations from the addon pattern:
+
+- The generated `Application` sets `CreateNamespace=false`: the app's namespaces are owned by its
+  Kargo `Project`, so ArgoCD must not race it.
+- Helm values are passed inline via `valuesObject` — the one place in this repo that does so.
+  They aren't hand-written values, they're `config.json` mechanically forwarded, so the
+  "values live in a reviewable file" rule is still satisfied by `config.json` itself.
 
 The `ApplicationSet` object itself is kept in sync from git by the self-syncing
 `apps-applicationset` `Application` (source: `argocd/apps-applicationset/`) — see the table in
 [Architecture](#architecture) above. Without that wrapper, editing this `ApplicationSet`'s
-generators/template would require a manual `kubectl apply -k argocd/ --server-side` to take
+generator/template would require a manual `kubectl apply -k argocd/ --server-side` to take
 effect, since the git generator only refreshes the _parameters_ it iterates over, not the
 `ApplicationSet`'s own spec.
 
-**Adding a new standalone app:**
-
-1. `apps/<app-name>/config.json` — `{"app": "<app-name>", "repoURL": "<app-repo-url>"}`. No `env`
-   key: that comes from the `list` generator's fixed pair, not from the app.
-2. Commit and push — the Git generator picks up the new `config.json` on its next refresh and the
-   matrix expands it to `<app-name>-dev` and `<app-name>-prd` `Application`s automatically, no
-   `ApplicationSet` edit and no new `Application` YAML to write by hand.
+Adding an app is one `config.json` plus the 1Password items it references — the full steps are under
+[Adding a new standalone app via Kargo](#adding-a-new-standalone-app-via-kargo).
 
 ### Current Applications
 
@@ -581,7 +584,7 @@ effect, since the git generator only refreshes the _parameters_ it iterates over
 | `argo-rollouts`                 | `-1`      | yes       | Progressive-delivery controller for tenant apps' `Rollout` resources — see the `rollouts-pod-template-hash` `ignoreDifferences` note under [Kargo](#kargo)                       |
 | `alloy`                         | `0`       | yes       | Log shipping - pods via the Kubernetes API, Talos's own logs via a LoadBalancer Service                                                                                          |
 | `cloudnative-pg`                | `0`       | yes       | CloudNativePG Postgres operator (`cnpg-system` namespace) - webhook `caBundle` is self-managed by the operator at runtime, so it's excluded via `ignoreDifferences`              |
-| `kargo`                         | `1`       | yes       | Platform, plus one live app (website) provisioned via `charts/tenant` — see [Kargo](#kargo)                                                                                      |
+| `kargo`                         | `1`       | yes       | Platform; the hosted apps (`website`, `helloworld`, `catering-calculator`) are provisioned via `charts/tenant` — see [Kargo](#kargo)                                             |
 
 ### Renovate
 
@@ -607,11 +610,11 @@ review and merge by hand, same as the manual bumps this replaces.
 ### Kargo
 
 The platform itself is installed as an addon (`argocd/addons/kargo.yaml`, sync-wave `1` — after
-`onepassword`, `cert-manager`, and `gateway`, which it depends on). Each standalone app hosted on
+`external-secrets`, `cert-manager`, and `gateway`, which it depends on). Each standalone app hosted on
 this cluster gets a `dev` and `prd` namespace/Stage, provisioned from the reusable `charts/tenant`
 Helm chart (see [Adding a new standalone app via Kargo](#adding-a-new-standalone-app-via-kargo)
-below) — the personal website (`apps/website/`) is the first app and the reference example, live
-end-to-end as of 2026-08-25. A Warehouse watches the app's image tags, Freight flows through a `dev`
+below) — the personal website (`apps/website/`) was the first app and is the reference example, live
+end-to-end since 2026-08-25; `helloworld` and `catering-calculator` followed through the same chart. A Warehouse watches the app's image tags, Freight flows through a `dev`
 Stage automatically, then a deliberate, manual approval (Kargo dashboard or `kargo promote`)
 promotes the same Freight to `prd`. Promotion itself is a direct git commit + push to the app repo's
 `main` (a `kustomize-set-image` step rewriting `deploy/overlays/{dev,prd}/kustomization.yaml`,
@@ -913,6 +916,14 @@ kubeseal -o yaml < raw-sa-token.yaml > sealedsecret-onepassword-sa-token.yaml
 rm raw-sa-token.yaml
 ```
 
+The ciphertext is bound to the `sealed-secrets` controller's current key pair. Back that key up
+somewhere outside the cluster (1Password works) — a rebuilt cluster gets a new pair and can't decrypt
+this file otherwise; see [Bootstrap sequence summary](#bootstrap-sequence-summary):
+
+```bash
+kubectl -n kube-system get secret -l sealedsecrets.bitnami.com/sealed-secrets-key=active -o yaml > sealed-secrets-key.yaml
+```
+
 One cluster-wide `ClusterSecretStore` (`addons/external-secrets/clustersecretstore-onepassword.yaml`)
 wires that token to the `Kubernetes` vault — every `ExternalSecret` in this cluster references it by
 name, regardless of namespace:
@@ -1102,6 +1113,65 @@ anything. Once ESO is up, it can take over managing that Secret:
 From this point on, rotating the PAT is just updating the `password` field on the 1Password item — see
 [Rotating the ArgoCD repo credential](#rotating-the-argocd-repo-credential).
 
+### Known issue: SDK WASM instance wedges after a network error (recheck when onepassword-sdk-go moves past v0.4.1)
+
+**Status: open, mitigated by alerting.** On 2026-09-08 every `ExternalSecret` in the cluster went
+`Ready=False` at once and stayed that way for ~30 hours, with every ArgoCD `Application` that owns
+one showing `Degraded`. The `ClusterSecretStore` stayed `Valid` the whole time and nothing in
+1Password had changed. Every reconcile failed with:
+
+```text
+error processing spec.dataFrom[0].extract, err: failed to list items: failed to list items:
+wasm error: out of bounds memory access
+wasm stack trace:
+        op_extism_core.wasm._ZN8dlmalloc8dlmalloc17Dlmalloc$LT$A$GT$6malloc17h44b8dc71ab434912E(i32) i32
+        op_extism_core.wasm._ZN10extism_pdk6extism10load_input17h1fed4249c383a9e7E(i32)
+        op_extism_core.wasm.invoke() i32
+```
+
+**Root cause**, from the controller's logs in Loki: at 04:35 UTC a transient CoreDNS `SERVFAIL` for
+`my.1password.com` hit the [1Password Go SDK](https://github.com/1Password/onepassword-sdk-go)
+(`v0.4.1`, pinned by ESO `v2.10.0`'s `providers/v1/onepasswordsdk/go.mod`) inside its
+`extism`/`wazero` WASM host call. The resulting Go panic was "recovered by wazero", but the WASM
+instance's heap was left corrupted — 24 seconds later the first `out of bounds memory access`
+appeared, and every SDK call since failed the same way at memory allocation. ESO's
+`onepasswordsdk` provider caches the SDK client, keyed on the `ClusterSecretStore`'s
+`resourceVersion`, and never recreates it on error, so the wedged instance was reused until the pod
+was restarted. The controller also has no liveness probe and no memory limit, so nothing self-healed;
+its working set climbed from a flat ~207 MiB to 440 MiB over the following day while stuck in the
+error loop.
+
+**Fix** (mutating — run it yourself): restart the controller, which creates a fresh SDK client and
+WASM instance. Every `ExternalSecret` went `Ready` after the restart on 2026-09-09:
+
+```bash
+kubectl -n external-secrets rollout restart deploy/external-secrets
+kubectl get externalsecrets -A
+```
+
+Bumping the `ClusterSecretStore`'s `resourceVersion` (any annotation change) also forces a new
+cached client, but leaves the broken one and its memory behind — the restart is cleaner.
+
+**Alerting** so this can never sit unnoticed for 30 hours again:
+`addons/external-secrets/prometheusrule-external-secrets.yaml` fires `ExternalSecretNotReady`
+(warning, per object, 15m) and `ExternalSecretsMostlyNotReady` (critical, half or more of all
+`ExternalSecret`s, 10m — the store/controller-level signature of this bug) to Telegram via the
+default route. Note the metric's namespace label for the `ExternalSecret` itself is
+`exported_namespace`; `namespace` is the scrape target's (`external-secrets`).
+
+**Upstream**: no matching issue in either repo as of 2026-09-09 — the closest
+([onepassword-sdk-go#208](https://github.com/1Password/onepassword-sdk-go/issues/208),
+[#209](https://github.com/1Password/onepassword-sdk-go/issues/209),
+[#280](https://github.com/1Password/onepassword-sdk-go/issues/280)) are about client lifecycle and
+memory, not a host-function panic corrupting the instance. Two things would fix this properly: the
+SDK not leaving the instance unusable after a recovered host panic, and/or ESO's provider dropping
+a cached client after an unrecoverable WASM error.
+
+**Recheck when**: an ESO release bumps `github.com/1password/onepassword-sdk-go` past `v0.4.1` in
+`providers/v1/onepasswordsdk/go.mod` (Renovate's ESO PR is the trigger — check that file at the new
+tag), or the provider's client-caching behaviour changes. Until then, `ExternalSecretsMostlyNotReady`
+plus the restart above is the runbook.
+
 ## Observability
 
 Metrics and logs for the cluster, replacing an earlier split Prometheus/Grafana/Loki/Alloy-operator setup
@@ -1193,10 +1263,20 @@ To verify the pipeline end-to-end without waiting for a real alert, temporarily 
 `telegram` instead of `null` in the config above and sync — a message should arrive within a few minutes
 (`group_wait: 30s`) — then revert.
 
+**Custom alert rules** live next to the addon they watch, as a `PrometheusRule` in
+`addons/<name>/prometheusrule-<name>.yaml` (added to that addon's `kustomization.yaml`), not in
+`kube-prometheus-stack`'s values. Prometheus picks them up from any namespace and without a
+`release:` label because `ruleSelectorNilUsesHelmValues: false` is set — the same reason every
+addon's unlabeled `ServiceMonitor` works. The first one is
+`addons/external-secrets/prometheusrule-external-secrets.yaml` (see
+[Known issue: SDK WASM instance wedges after a network error](#known-issue-sdk-wasm-instance-wedges-after-a-network-error-recheck-when-onepassword-sdk-go-moves-past-v041)
+for what it guards against). The Alertmanager route above doesn't match on `severity`: everything
+not explicitly sent to `null` reaches Telegram, so `severity` is informational.
+
 ### Metrics dashboards
 
 Grafana comes with kube-prometheus-stack's bundled dashboards (Kubernetes cluster/node/pod views,
-CoreDNS, etc.) under **Dashboards**. Two known gaps, not bugs to chase if rediscovered:
+CoreDNS, etc.) under **Dashboards**. Three known gaps, not bugs to chase if rediscovered:
 
 - The Alertmanager Grafana datasource plugin ships with `autoEnabled: false`, so it 500s with
   `plugin.unavailable` when viewed through Grafana. Alertmanager's own UI works fine standalone.
@@ -1238,10 +1318,14 @@ official upstream mixins (`grafana/loki`'s `loki-mixin`, `grafana/alloy`'s `allo
 
 Every panel's PromQL was checked against live Prometheus metric names before writing, not assumed.
 
-### Known log noise (recheck on next Kubernetes upgrade)
+### Known log noise (resolved in Kubernetes v1.37)
 
-`{namespace="kube-system"} |= "2379"` shows recurring `kube-apiserver` warnings on all 3 nodes, every
-~10-30s, e.g.:
+**Status: resolved.** Rechecked 2026-09-09 on Kubernetes `v1.37.0` / Talos `v1.14.0`: a 7-day Loki
+query for `{namespace="kube-system", container="kube-apiserver"} |= "createTransport"` returns
+nothing. Kept as the record of how the issue was tracked.
+
+Between 2026-08-16 and the `v1.37.0` upgrade, `{namespace="kube-system"} |= "2379"` showed recurring
+`kube-apiserver` warnings on all 3 nodes, every ~10-30s, e.g.:
 
 ```text
 W0816 19:53:07.904157       1 logging.go:55] [core] [Channel #32593 SubChannel #32594] grpc:
@@ -1251,35 +1335,68 @@ Err: connection error: desc = "transport: authentication handshake failed: conte
 
 Root cause, confirmed upstream in [kubernetes/kubernetes#134080](https://github.com/kubernetes/kubernetes/issues/134080):
 `kube-apiserver` was recreating its etcd client on every metrics scrape instead of reusing a cached
-connection — harmless log churn, not an actual etcd/apiserver problem (cluster health is unaffected).
+connection — harmless log churn, not an actual etcd/apiserver problem (cluster health was unaffected).
 Fixed by [kubernetes/kubernetes#138075](https://github.com/kubernetes/kubernetes/pull/138075), merged
-2026-04-22, targeting **Kubernetes v1.37**; a backport to 1.34-1.36 was discussed in the PR but not
-confirmed shipped as of this writing. This cluster was on `v1.36.2` when this entry was written; it
-has since been upgraded to `v1.37.0` (`kubernetesVersion` in `talos/topf.yaml`) but this entry has
-not yet been rechecked against that fix.
+2026-04-22, targeting Kubernetes v1.37. This cluster was on `v1.36.2` when the entry was opened,
+with an explicit recheck trigger (bump `kubernetesVersion` in `talos/topf.yaml` past `1.36.2`); the
+trigger fired with the upgrade to `v1.37.0` and the recheck confirmed the fix.
 
-**Recheck when**: `kubernetesVersion` in `talos/topf.yaml` is bumped past `1.36.2` — see if this
-noise disappears; if not, check whether the 1.34-1.36 backport of #138075 ever landed.
+## Bootstrap sequence summary
 
-## Overall setup summary and sequence
+The order things have to happen in when building this cluster from nothing. After step 5,
+cluster changes are git commits; step 6 lists the deliberate exceptions that live outside git.
 
-1. Boot TalOS on each node from the USB stick and apply the TalOS config files.
-2. Bootstrap the first node (kihnu.nodes.ee) and initialize the cluster.
-3. Apply Gateway API CRDs (imperative, one-time).
-4. Install Cilium via Helm.
-5. Install ArgoCD (imperative, one-time).
-6. Hand over to GitOps by applying `argocd/` kustomization.
-7. Apply Cilium BGP/LoadBalancerIPPool via GitOps
-8. Apply Sealed Secrets, Metrics Server, and Kubelet Serving Cert Approver via GitOps
-9. Apply 1Password Operator via GitOps
-10. Apply Cert-manager, and External-DNS via GitOps
-11. Apply Gateway API via GitOps
-12. Apply Hubble Gateway API resources via GitOps
-13. Apply ArgoCD Gateway API resources and patches via GitOps
-14. Apply Longhorn via GitOps
-15. Apply Prometheus Operator CRDs, kube-prometheus-stack, Loki, and Alloy via GitOps (see
-    [Observability](#observability))
-16. Patch `talos/control-plane/` for `kube-scheduler`/`kube-controller-manager`
-    `bind-address: 0.0.0.0` (needed for Prometheus to scrape them) and
-    `machine.logging.destinations`/`KmsgLogConfig` (ships Talos's own logs to Alloy), then
-    `topf render` to review and `topf apply` to push it
+1. **Talos** — boot each node from the SecureBoot USB image and run `topf apply --auto-bootstrap`
+   from `talos/`. That one step applies every machine config in this repo — including the
+   control-plane patches Prometheus and Alloy depend on later (`bind-address: 0.0.0.0` for
+   `kube-scheduler`/`kube-controller-manager`, `machine.logging.destinations`, `KmsgLogConfig`) —
+   and bootstraps etcd on the first node. See [Talos Linux installation](#talos-linux-installation).
+2. **Gateway API CRDs + Cilium** — imperative, from the repo's values file. Nodes go `Ready` here.
+   See [Network CNI](#network-cni).
+3. **ArgoCD** — imperative, one-time: the repo credential and the pinned upstream `install.yaml`.
+   See [Bootstrap (from zero)](#bootstrap-from-zero).
+4. **Sealed Secrets key (rebuild only)** — the one piece of secret material in git,
+   `addons/external-secrets/sealedsecret-onepassword-sa-token.yaml`, is encrypted to the
+   `sealed-secrets` controller's key pair, and the controller generates a fresh pair the first time
+   it starts. On a genuine rebuild that new pair can't decrypt the committed file, so **before**
+   handing over to GitOps either restore the previous controller's key `Secret` into `kube-system`
+   from the backup taken as described under [Installation](#installation), or re-seal the 1Password
+   service-account token with the new controller's key. Everything else ESO-managed follows once
+   that one Secret decrypts.
+5. **Hand over to GitOps** — `kubectl apply -k argocd/ --server-side`. ArgoCD takes over its own
+   install, adopts the Cilium release (same chart version and values, so the only diff is the
+   `ServiceMonitor`s it now enables), and syncs every other addon in sync-wave order — see the
+   [Current Applications](#current-applications) table: CRDs, then `sealed-secrets`/
+   `metrics-server`/`kubelet-serving-cert-approver`, `external-secrets`/`reloader`,
+   `cert-manager`/`external-dns`/`cloudflared`, `gateway`, `longhorn`, the observability stack,
+   `cloudnative-pg`, and finally `kargo` and the hosted apps.
+6. **Out-of-band, by design** — what lives outside git: the 1Password items every `ExternalSecret`
+   reads, the Cloudflare Tunnel public hostnames, and the ArgoCD GitHub webhook secret (see
+   [Forcing an immediate refresh (GitHub webhook)](#forcing-an-immediate-refresh-github-webhook)).
+
+## Development (pre-commit hooks)
+
+This repo uses [pre-commit](https://pre-commit.com/) to catch formatting/lint/schema issues before they
+land - install once per clone, then it runs automatically on every commit:
+
+```bash
+pre-commit install
+```
+
+Check everything now (useful right after cloning, or after pulling changes):
+
+```bash
+pre-commit run --all-files
+```
+
+What's checked (`.pre-commit-config.yaml`):
+
+- General hygiene - trailing whitespace, end-of-file newlines, merge conflict markers, large files.
+- YAML - syntax (`check-yaml`) and style (`yamllint`, config in `.yamllint.yaml`).
+- Markdown - auto-formatted with `prettier` (table alignment, etc.), then linted with
+  `markdownlint-cli2` (config in `.markdownlint-cli2.yaml`).
+- Secrets - `gitleaks` scans staged changes for accidentally committed credentials.
+- Kubernetes manifests - every `kustomization.yaml` in the repo gets built (`kubectl kustomize`) and
+  validated against the Kubernetes API + CRD schemas with `kubeconform`
+  (`scripts/kustomize-validate.sh`). Needs network access (schema/CRD lookups); results are cached in
+  `.kubeconform-cache/` (gitignored) after the first run.

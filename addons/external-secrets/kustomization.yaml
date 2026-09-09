@@ -4,3 +4,4 @@ kind: Kustomization
 resources:
   - sealedsecret-onepassword-sa-token.yaml
   - clustersecretstore-onepassword.yaml
+  - prometheusrule-external-secrets.yaml
