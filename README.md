@@ -74,6 +74,10 @@ ROADMAP.md        # deferred and considered changes
     - [Network configuration](#network-configuration)
     - [Talos Linux installation](#talos-linux-installation)
     - [Network CNI](#network-cni)
+  - [Cluster Upgrades](#cluster-upgrades)
+    - [Upgrading Talos Linux](#upgrading-talos-linux)
+      - [Known issue: topf 0.6.0 can't render Talos past v1.14.0](#known-issue-topf-060-cant-render-talos-past-v1140)
+    - [Upgrading Kubernetes](#upgrading-kubernetes)
   - [GitOps](#gitops)
     - [Architecture](#architecture)
     - [Bootstrap (from zero)](#bootstrap-from-zero)
@@ -264,6 +268,122 @@ cilium status --wait
 BGP peering with the router, the LoadBalancer IP pool, and the Hubble UI route are plain manifests
 under `addons/cilium/` and arrive with the `cilium` `Application` — see
 [Advanced Networking](#advanced-networking).
+
+## Cluster Upgrades
+
+Talos OS and Kubernetes each have their own version pinned in `talos/topf.yaml` (`talosVersion` and
+`kubernetesVersion`), and they upgrade **independently** — bumping one never triggers the other, and
+either order is fine. Neither is tracked by Renovate (`renovate.json`'s `customManagers` only watches
+`argocd/install/kustomization.yaml` and addon chart versions under `addons/`), so check the upstream
+release pages yourself and bump these by hand:
+
+- Talos: <https://github.com/siderolabs/talos/releases>
+- Kubernetes: <https://github.com/kubernetes/kubernetes/releases>
+
+Check what's actually running before deciding what to bump to:
+
+```bash
+talosctl version   # client vs. each node's Talos version
+kubectl version     # client vs. server (control plane) Kubernetes version
+```
+
+Both upgrades are mutating cluster operations — per this repo's rule (see `CLAUDE.md`'s
+"Mutating actions" section), Claude prepares and dry-runs, the user runs the real command.
+
+### Upgrading Talos Linux
+
+1. Bump `talosVersion` in `talos/topf.yaml` to the target release.
+2. Render locally first, and grep the output for the installer image tag to confirm it actually
+   moved (no cluster contact) — see the [Known issue](#known-issue-topf-060-cant-render-talos-past-v1140)
+   below before trusting this blindly:
+
+   ```bash
+   cd talos
+   topf render -o /tmp/topf-check --redact=false
+   grep -h 'factory.talos.dev' /tmp/topf-check/*.yaml   # tag at the end must match the bump
+   ```
+
+3. Dry-run against the live cluster:
+
+   ```bash
+   topf upgrade --dry-run
+   ```
+
+4. Apply for real:
+
+   ```bash
+   topf upgrade
+   ```
+
+   `topf` resolves the installer image from `talosVersion` plus the schematic ID
+   (`talos/schematic.yaml`), then upgrades nodes one at a time by default
+   (`--max-parallel`, though control-plane nodes are always sequential regardless — this cluster has
+   no `worker/` role to parallelize), draining and cordoning each node first, waiting for it to
+   reboot and stabilize (`--stabilization-duration`, default `30s`) before moving to the next.
+   Talos's A-B image scheme rolls a node back automatically if it fails to boot into the new version.
+
+5. Verify every node landed on the new version:
+
+   ```bash
+   talosctl get nodestatuses
+   talosctl version
+   ```
+
+6. Commit the `topf.yaml` bump.
+
+Talos upgrades never touch the running Kubernetes version (by design, since Talos v1.0) — see below
+if kubelet/control-plane components also need to move.
+
+#### Known issue: topf 0.6.0 can't render Talos past v1.14.0
+
+`topf` resolves the installer image tag from its own vendored `siderolabs/talos` machinery, not by
+templating the `talosVersion` string directly — so a binary that predates a given Talos release
+silently keeps rendering the last version it knows, ignoring a newer `talosVersion` in `topf.yaml`
+with no error. `topf` `v0.6.0` (`topf --version` reports `topf version 0.6.0 (Talos v1.14.0)`) hit
+this on `v1.14.1`: `topf render` kept emitting the `:v1.14.0` installer tag and `topf upgrade
+--dry-run` reported "no upgrade required" even though the live nodes were genuinely still on
+`v1.14.0` (confirmed via `talosctl version`, whose client binary had separately been upgraded to
+`v1.14.1`). Filed upstream: machinery support for `v1.14.1` landed in
+[`postfinance/topf` `v0.6.1-rc.0`/`rc.1`](https://github.com/postfinance/topf/releases) (Sep 16/23,
+2026), but no stable `v0.6.1` yet as of 2026-09-27. Until one ships, `talosVersion` in
+`talos/topf.yaml` stays pinned at `v1.14.0` — **recheck when `postfinance/topf` cuts a stable
+`v0.6.1`** (or later) release, then retry the `v1.14.1` bump.
+
+### Upgrading Kubernetes
+
+There's no `topf` subcommand for this — Kubernetes control-plane components are upgraded via
+`talosctl upgrade-k8s`, which pre-pulls the new component images, patches every control-plane node's
+static pod manifests (`kube-apiserver`, `kube-controller-manager`, `kube-scheduler`), rolls the
+`kube-proxy` daemonset, upgrades `kubelet` on every node, then re-applies and prunes bootstrap
+manifests — in that order, waiting for each phase to go healthy before starting the next.
+
+1. Bump `kubernetesVersion` in `talos/topf.yaml` to the target release (keeps future `topf
+render`/`apply` in sync with what's actually running — the field feeds `{{ .KubernetesVersion }}`
+   in any templated patch).
+2. Dry-run (any control-plane node works — `talosctl` fans the change out to the whole cluster):
+
+   ```bash
+   talosctl -n <control-plane-ip> upgrade-k8s --to <version> --dry-run
+   ```
+
+3. Apply for real:
+
+   ```bash
+   talosctl -n <control-plane-ip> upgrade-k8s --to <version>
+   ```
+
+   Safe to re-run if it fails partway through — it resumes from the point of failure.
+
+4. Verify:
+
+   ```bash
+   kubectl get nodes -o wide   # every node reports the new version
+   kubectl version
+   ```
+
+5. Commit the `topf.yaml` bump. If the bump crosses a `kubernetesVersion` recheck trigger tracked
+   elsewhere in this README (e.g. the [Known log noise](#known-log-noise-resolved-in-kubernetes-v137)
+   entry), revisit that item too.
 
 ## GitOps
 

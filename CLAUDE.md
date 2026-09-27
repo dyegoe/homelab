@@ -76,6 +76,12 @@ Use `topf talosconfig > talosconfig` (then `export TALOSCONFIG=$(pwd)/talosconfi
 12-hour admin kubeconfig — fine for ad-hoc access, but not a substitute for whatever
 longer-lived/GitOps-managed kubeconfig normally drives `kubectl`.
 
+**Upgrading Talos or Kubernetes**: full runbook lives in README.md's `Cluster Upgrades` section —
+that's the canonical reference. Summary: `talosVersion` and `kubernetesVersion` in `talos/topf.yaml`
+upgrade independently (Talos via `topf upgrade`, Kubernetes via `talosctl upgrade-k8s --to
+<version>`), neither is Renovate-managed, and both are mutating — same rule as `apply`/`upgrade`
+above, Claude renders/dry-runs, the user runs the real command.
+
 ## GitOps architecture
 
 Full runbook (bootstrap from zero, the Application template, how to add a new addon) lives in
