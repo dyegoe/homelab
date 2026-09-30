@@ -106,6 +106,8 @@ ROADMAP.md        # deferred and considered changes
     - [Alerting (Telegram)](#alerting-telegram)
     - [Metrics dashboards](#metrics-dashboards)
     - [Known log noise (resolved in Kubernetes v1.37)](#known-log-noise-resolved-in-kubernetes-v137)
+  - [Storage (Longhorn)](#storage-longhorn)
+    - [Known issue: removed system snapshot never purged, volume uses ~2x its size (recheck on the next Longhorn upgrade or replica rebuild)](#known-issue-removed-system-snapshot-never-purged-volume-uses-2x-its-size-recheck-on-the-next-longhorn-upgrade-or-replica-rebuild)
   - [Bootstrap sequence summary](#bootstrap-sequence-summary)
   - [Development (pre-commit hooks)](#development-pre-commit-hooks)
 
@@ -1462,6 +1464,55 @@ Fixed by [kubernetes/kubernetes#138075](https://github.com/kubernetes/kubernetes
 2026-04-22, targeting Kubernetes v1.37. This cluster was on `v1.36.2` when the entry was opened,
 with an explicit recheck trigger (bump `kubernetesVersion` in `talos/topf.yaml` past `1.36.2`); the
 trigger fired with the upgrade to `v1.37.0` and the recheck confirmed the fix.
+
+## Storage (Longhorn)
+
+### Known issue: removed system snapshot never purged, volume uses ~2x its size (recheck on the next Longhorn upgrade or replica rebuild)
+
+**Status: open, root cause of the stall unknown, fixed by hand when it recurs.** On 2026-09-30 the
+Prometheus volume (`pvc-4d4454f9-99b0-409e-bd4f-43dd9158143b`, 50 GiB) showed an actual size of
+94.8 GiB in the Longhorn UI. Nothing was wrong with the filesystem — `actualSize` is the physical
+size of the replica's layers (snapshot files plus the live `volume-head`), not the logical size.
+
+**Root cause of the bloat**: a system snapshot (`userCreated: false`, created 2026-09-04 14:20 during
+a replica rebuild) was marked `removed: true` but never merged away. It held ~47 GiB of the volume as
+it was on 09-04; Prometheus then rewrote most of its TSDB (WAL churn, compaction, block deletion) and
+Longhorn wrote those changes into the head instead of overwriting the snapshot's blocks, so the head
+grew to ~47 GiB as well. The instance-manager log shows the removal starting on 09-04 (`Pruning
+overlapping chunks from volume-snap-…`) with no completion line, then the replica was recreated on
+09-06 and both replicas were replaced by the v1.12.1 → v1.13.0 live engine upgrade on 09-30 — either
+could have interrupted it. There was no error anywhere and the engine's `purgeStatus` was idle, and
+`auto-cleanup-system-generated-snapshot` was already `true`, so _why_ nothing retried is not known.
+There are no `RecurringJob`s in the cluster, so this was not a job.
+
+**Symptom to look for**: `actualSize` ≈ 2x `spec.size`, plus a snapshot with `markRemoved: true` and
+`readyToUse: false`:
+
+```bash
+kubectl -n longhorn-system get volumes.longhorn.io -o custom-columns=N:.metadata.name,SIZE:.spec.size,ACTUAL:.status.actualSize
+kubectl -n longhorn-system get snapshots.longhorn.io -o custom-columns=V:.status.volume,N:.metadata.name,SIZE:.status.size,REMOVED:.status.markRemoved,READY:.status.readyToUse
+```
+
+**Fix** (mutating — run it yourself). The UI has no purge button; call the manager's `snapshotPurge`
+action through the frontend service. Check free disk on the replica nodes first, since a purge needs
+some temporary headroom:
+
+```bash
+kubectl -n longhorn-system port-forward svc/longhorn-frontend 8080:80
+# second terminal:
+curl -s -X POST 'http://localhost:8080/v1/volumes/<pvc-name>?action=snapshotPurge'
+# watch: isPurging -> true, then state "complete", progress 100
+kubectl -n longhorn-system get engines.longhorn.io <pvc-name>-e-0 -o jsonpath='{.status.purgeStatus}'
+```
+
+Result on 2026-09-30: `actualSize` went from 101.77 GB to 52.31 GB (48.7 GiB) and the stuck snapshot
+shrank from 50.7 GB to 1.2 GB.
+
+**Recheck when**: the next Longhorn chart bump (Renovate PR) or the next replica rebuild/engine
+upgrade — rerun the two detection commands afterwards. If it recurs, capture the engine's
+`status.purgeStatus` and the instance-manager log around the snapshot removal before purging, since
+the stall itself was never diagnosed, then file it upstream at
+[longhorn/longhorn](https://github.com/longhorn/longhorn/issues) and record the link here.
 
 ## Bootstrap sequence summary
 
