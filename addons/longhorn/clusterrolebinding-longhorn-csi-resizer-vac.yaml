@@ -12,9 +12,6 @@ roleRef:
   kind: ClusterRole
   name: longhorn-csi-resizer-vac
 subjects:
-  - kind: ServiceAccount
-    name: longhorn-service-account
-    namespace: longhorn-system
   # Chart 1.13 runs the CSI sidecars under a dedicated account whose role lacks VAC access
   - kind: ServiceAccount
     name: longhorn-csi-service-account
