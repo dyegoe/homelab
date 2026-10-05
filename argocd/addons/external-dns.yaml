@@ -11,7 +11,7 @@ metadata:
 spec:
   project: addons
   sources:
-    - repoURL: https://kubernetes-sigs.github.io/external-dns/
+    - repoURL: https://kubernetes-sigs.github.io/external-dns
       chart: external-dns
       targetRevision: 1.23.0
       helm:
