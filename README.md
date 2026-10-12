@@ -46,8 +46,8 @@ If you are here to see how things are done rather than to operate the cluster, s
   upstream dashboards were rebuilt rather than ported, and why.
 - [Known log noise](#known-log-noise-resolved-in-kubernetes-v137) (closed) and the
   [ESO known issue](#known-issue-sdk-wasm-instance-wedges-after-a-network-error-recheck-when-onepassword-sdk-go-moves-past-v041)
-  (open) — tracked issues with an explicit recheck trigger, the pattern this repo uses for deferred
-  items.
+  (open) — known issues written up with root cause and an explicit recheck trigger, each tracked by
+  a GitHub issue (see [Tracking work](#tracking-work)).
 
 ## Repository layout
 
@@ -59,8 +59,17 @@ apps/<name>/      # one config.json per hosted application, consumed by charts/t
 charts/tenant/    # Helm chart provisioning a tenant app: ArgoCD Applications + Kargo Project/Warehouse/Stages
 scripts/          # pre-commit helper (kustomize build + kubeconform validation)
 renovate.json     # automated version bumps for charts, images, and the ArgoCD install tag
-ROADMAP.md        # deferred and considered changes
 ```
+
+### Tracking work
+
+Deferred changes, known issues and accepted gaps are tracked as
+[GitHub issues](https://github.com/dyegoe/homelab/issues), not in files in this repo. Issues labelled
+[`known-issue`](https://github.com/dyegoe/homelab/issues?q=is%3Aissue+is%3Aopen+label%3Aknown-issue) have a workaround in place and an
+explicit **recheck trigger** (e.g. "the next Talos upgrade", "an ESO release bumps the 1Password SDK
+past v0.4.1"). When the trigger fires, recheck and update or close the issue. Decided-against items
+are closed as _not planned_, so the reasoning stays searchable. The longer write-ups in this README
+(root cause, evidence, runbook) stay here and link to their tracking issue.
 
 ## Table of Contents
 
@@ -68,6 +77,7 @@ ROADMAP.md        # deferred and considered changes
   - [Stack at a glance](#stack-at-a-glance)
   - [Worth reading](#worth-reading)
   - [Repository layout](#repository-layout)
+    - [Tracking work](#tracking-work)
   - [Table of Contents](#table-of-contents)
   - [Initial Cluster Setup](#initial-cluster-setup)
     - [Hardware Specifications](#hardware-specifications)
@@ -218,7 +228,7 @@ topf kubeconfig > ~/.kube/config
 > with the wrong secretbox key name (`key1` instead of the historically-correct `key2`) during the
 > Talos v1.14.0 multi-doc config migration, breaking `kube-apiserver`'s ability to decrypt existing
 > etcd Secrets on one node until manually patched. `topf` depends on the released `machinery v1.14.0`
-> (fix included) and is actively maintained — see `ROADMAP.md`'s history for the migration.
+> (fix included) and is actively maintained — see commit `e186c23` for the migration.
 
 You can follow the cluster initialization progress by running the following commands:
 
@@ -360,8 +370,8 @@ Bumping `talosVersion` to `v1.14.1` then silently kept rendering `:v1.14.0` and 
 --dry-run` reported "no upgrade required". This was first misdiagnosed as `topf` `v0.6.0` lacking
 `v1.14.1` machinery support, and `talosVersion` sat pinned at `v1.14.0` waiting for a stable `topf`
 `v0.6.1` — but rendering with `v0.6.1` still produced `:v1.14.0`, which exposed the hardcoded tag
-as the real cause. Retiring `machine.install` in favour of `UnattendedInstallConfig` (see
-`ROADMAP.md`) would remove this footgun entirely.
+as the real cause. Retiring `machine.install` in favour of `UnattendedInstallConfig` (tracked in
+[#91](https://github.com/dyegoe/homelab/issues/91)) would remove this footgun entirely.
 
 #### Known issue: kexec reboot can hang a node during upgrade (recheck on the next Talos upgrade)
 
@@ -377,7 +387,7 @@ firmware/GPU/NIC combinations. The nodes aren't identical hardware: `kihnu` is a
 G2 DM 65W (BIOS 02.47), `muhu` the 35W model (BIOS 02.63), `ruhnu` a Lenovo `10MUS0J600`. `ruhnu`
 was then upgraded with `--reboot-mode powercycle` without issue.
 
-Until there's evidence kexec is reliable on all three, upgrade with `--reboot-mode powercycle`
+Tracked in [#90](https://github.com/dyegoe/homelab/issues/90). Until there's evidence kexec is reliable on all three, upgrade with `--reboot-mode powercycle`
 (step 4 above). It adds a minute or two per node. **Recheck on the next Talos upgrade**: if you want
 to test kexec again, upgrade `muhu` alone (`--nodes-filter muhu`) with the default reboot mode, with
 someone at the console. If it hangs again, consider making it permanent with a
@@ -416,9 +426,9 @@ render`/`apply` in sync with what's actually running — the field feeds `{{ .Ku
    kubectl version
    ```
 
-5. Commit the `topf.yaml` bump. If the bump crosses a `kubernetesVersion` recheck trigger tracked
-   elsewhere in this README (e.g. the [Known log noise](#known-log-noise-resolved-in-kubernetes-v137)
-   entry), revisit that item too.
+5. Commit the `topf.yaml` bump. If the bump crosses a `kubernetesVersion` recheck trigger in an
+   open [`known-issue`](https://github.com/dyegoe/homelab/issues?q=is%3Aissue+is%3Aopen+label%3Aknown-issue) GitHub issue, revisit that
+   item too.
 
 ## GitOps
 
@@ -1270,7 +1280,7 @@ From this point on, rotating the PAT is just updating the `password` field on th
 
 ### Known issue: SDK WASM instance wedges after a network error (recheck when onepassword-sdk-go moves past v0.4.1)
 
-**Status: open, mitigated by alerting.** On 2026-09-08 every `ExternalSecret` in the cluster went
+**Status: open, mitigated by alerting.** Tracked in [#95](https://github.com/dyegoe/homelab/issues/95). On 2026-09-08 every `ExternalSecret` in the cluster went
 `Ready=False` at once and stayed that way for ~30 hours, with every ArgoCD `Application` that owns
 one showing `Degraded`. The `ClusterSecretStore` stayed `Valid` the whole time and nothing in
 1Password had changed. Every reconcile failed with:
@@ -1436,16 +1446,17 @@ Grafana comes with kube-prometheus-stack's bundled dashboards (Kubernetes cluste
 CoreDNS, etc.) under **Dashboards**. Three known gaps, not bugs to chase if rediscovered:
 
 - The Alertmanager Grafana datasource plugin ships with `autoEnabled: false`, so it 500s with
-  `plugin.unavailable` when viewed through Grafana. Alertmanager's own UI works fine standalone.
+  `plugin.unavailable` when viewed through Grafana. Alertmanager's own UI works fine standalone
+  ([#98](https://github.com/dyegoe/homelab/issues/98), not planned).
 - The bundled "kubernetes-mixin" dashboards (Compute Resources: Namespace/Pod/Workload) key off a
   `cluster` label that a standalone, non-federated Prometheus like this one never sets on locally-queried
   series (`externalLabels` only affects federation/remote-write/Alertmanager metadata, not local
   queries) — accepted as a known gap rather than adding `metricRelabelings` to every `ServiceMonitor`
-  across every addon.
+  across every addon ([#97](https://github.com/dyegoe/homelab/issues/97), not planned).
 - etcd has no metrics or dashboard at all — it's a native Talos host service, not a Kubernetes workload,
   so there's no pod/Service for a `ServiceMonitor` to target. Wiring it up would need Talos-level exposure
   of etcd's metrics endpoint plus a scrape config, which hasn't been done. Accepted as a known gap, not
-  planned unless a concrete need for etcd visibility comes up.
+  planned unless a concrete need for etcd visibility comes up ([#96](https://github.com/dyegoe/homelab/issues/96)).
 
 Every addon with a live Prometheus target also ships its own dashboard(s), as a `ConfigMap` labeled
 `grafana_dashboard: "1"` in `addons/<name>/dashboards/` (auto-discovered by Grafana's sidecar, which has
@@ -1470,8 +1481,8 @@ official upstream mixins (`grafana/loki`'s `loki-mixin`, `grafana/alloy`'s `allo
   reconcile rate/errors/latency and workqueue depth/latency **per Kargo resource type** — the
   generic reconciler metrics' `controller` label is still set to the real resource name
   (`promotion`/`stage`/`warehouse`/`control_flow_stage`/`project`/...), so this is a genuine signal,
-  just not promotion counts or verification outcomes. Recheck once real Warehouses/Stages exist and
-  if a newer Kargo version ever adds business metrics.
+  just not promotion counts or verification outcomes. Recheck if a newer Kargo version ever adds
+  business metrics ([#99](https://github.com/dyegoe/homelab/issues/99)).
 
 Every panel's PromQL was checked against live Prometheus metric names before writing, not assumed.
 
@@ -1502,7 +1513,9 @@ trigger fired with the upgrade to `v1.37.0` and the recheck confirmed the fix.
 
 ### Known issue: removed system snapshot never purged, volume uses ~2x its size (recheck on the next Longhorn upgrade or replica rebuild)
 
-**Status: open, root cause of the stall unknown, fixed by hand when it recurs.** On 2026-09-30 the
+**Status: open, root cause of the stall unknown, fixed by hand when it recurs.** Tracked in
+[#93](https://github.com/dyegoe/homelab/issues/93), which also has the evidence from the **2026-10-12 recurrence** (every volume left with a
+removed-but-unmerged base snapshot after the Talos upgrade's replica rebuilds). On 2026-09-30 the
 Prometheus volume (`pvc-4d4454f9-99b0-409e-bd4f-43dd9158143b`, 50 GiB) showed an actual size of
 94.8 GiB in the Longhorn UI. Nothing was wrong with the filesystem — `actualSize` is the physical
 size of the replica's layers (snapshot files plus the live `volume-head`), not the logical size.
