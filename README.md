@@ -1461,10 +1461,13 @@ CoreDNS, etcd, etc.) under **Dashboards**. Two known gaps, not bugs to chase if 
 **etcd** is a native Talos host service, not a Kubernetes workload, so there's no pod for the chart's
 default `component: etcd` selector to match. `talos/control-plane/08-etcd-metrics.yaml` opens a
 plain-HTTP metrics listener on each node (`listen-metrics-urls: http://0.0.0.0:2381`; Talos v1.14 otherwise
-serves metrics only on port 2383 behind etcd client mTLS), and `kubeEtcd.endpoints` in the chart values lists
-the three node IPs, so the chart creates a selector-less Service plus `Endpoints` in `kube-system` for its
-`ServiceMonitor`. The same `kubeEtcd` toggle turns on the chart's bundled etcd dashboard and alert rules.
-Keep `kubeEtcd.endpoints` in sync with `talos/topf.yaml` when nodes change
+serves metrics only on port 2383 behind etcd client mTLS). Applying it needs a reboot per node: Talos
+doesn't restart etcd on a spec change and refuses `talosctl service etcd restart`. Prometheus scrapes the
+three nodes through a static `kube-etcd` job in `prometheus.prometheusSpec.additionalScrapeConfigs`, not
+through the chart's `kubeEtcd.endpoints`. That option renders a v1 `Endpoints` object, which ArgoCD's default
+`resource.exclusions` silently drops, leaving the Service with no targets. `kubeEtcd.enabled` stays on
+(with its Service/ServiceMonitor off) because it also turns on the chart's bundled etcd dashboard and alert
+rules. Keep the scrape targets in sync with `talos/topf.yaml` when nodes change
 ([#96](https://github.com/dyegoe/homelab/issues/96)).
 
 Every addon with a live Prometheus target also ships its own dashboard(s), as a `ConfigMap` labeled
