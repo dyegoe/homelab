@@ -21,6 +21,10 @@ defaultSettings:
   # volume whose replicas are already on distinct nodes counts as balanced, so this does NOT
   # spread replicas across nodes cluster-wide (see #94).
   replicaAutoBalance: best-effort
+  # When a node comes back from an outage after its replicas were rebuilt elsewhere, its old replica
+  # directories (and any leftover instance-manager processes) become orphans. Delete them
+  # automatically after the default 300s grace period instead of leaving them on disk (#94).
+  orphanResourceAutoDeletion: replica-data;instance
   storageMinimalAvailablePercentage: 10
   guaranteedInstanceManagerCPU: 12
   upgradeChecker: false
