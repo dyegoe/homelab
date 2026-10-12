@@ -16,6 +16,11 @@ defaultSettings:
   # instead). 2 replicas always has one genuinely free node to land on.
   defaultReplicaCount: 2
   replicaSoftAntiAffinity: true
+  # Safety net for the soft anti-affinity above: if an outage leaves two replicas of a volume on
+  # one node, move one back to a free node once it's available. Balancing is per volume only: a
+  # volume whose replicas are already on distinct nodes counts as balanced, so this does NOT
+  # spread replicas across nodes cluster-wide (see #94).
+  replicaAutoBalance: best-effort
   storageMinimalAvailablePercentage: 10
   guaranteedInstanceManagerCPU: 12
   upgradeChecker: false
