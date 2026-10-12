@@ -56,8 +56,11 @@ prometheus:
     scrapeClasses:
       - name: default
         default: true
+        # `action: replace` is the default, but the API server writes it into the live Prometheus
+        # object anyway; leaving it out here keeps ArgoCD permanently OutOfSync on that field.
         relabelings:
-          - targetLabel: cluster
+          - action: replace
+            targetLabel: cluster
             replacement: k8s.nodes.ee
     # nil selectors would otherwise only pick up ServiceMonitors/PodMonitors/PrometheusRules
     # labeled `release: kube-prometheus-stack` - every other addon's ServiceMonitor (cilium,
