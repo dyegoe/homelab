@@ -86,7 +86,7 @@ are closed as _not planned_, so the reasoning stays searchable. The longer write
     - [Network CNI](#network-cni)
   - [Cluster Upgrades](#cluster-upgrades)
     - [Upgrading Talos Linux](#upgrading-talos-linux)
-      - [Gotcha: the installer image tag lives in a patch, not just `talosVersion`](#gotcha-the-installer-image-tag-lives-in-a-patch-not-just-talosversion)
+      - [How the installer image is resolved](#how-the-installer-image-is-resolved)
       - [Known issue: kexec reboot can hang a node during upgrade (recheck on the next Talos upgrade)](#known-issue-kexec-reboot-can-hang-a-node-during-upgrade-recheck-on-the-next-talos-upgrade)
     - [Upgrading Kubernetes](#upgrading-kubernetes)
   - [GitOps](#gitops)
@@ -160,11 +160,9 @@ The installer image comes from the [Talos Image Factory](https://factory.talos.d
 `talos/schematic.yaml`: bare-metal, `amd64`, SecureBoot, plus the `siderolabs/iscsi-tools` and
 `siderolabs/util-linux-tools` system extensions Longhorn needs. `topf` hashes that file into the
 schematic ID itself (`schematicId: "@schematic.yaml"` in `talos/topf.yaml`); the Talos release to
-pair it with is `talosVersion` in the same file. One exception: the legacy `machine.install.image`
-in `talos/all/01-install-disk.yaml.tpl` carries the schematic ID as a literal (topf doesn't expose
-it to patch templates), so a `schematic.yaml` change also means updating that hash by hand — see the
-[gotcha](#gotcha-the-installer-image-tag-lives-in-a-patch-not-just-talosversion) under
-Cluster Upgrades.
+pair it with is `talosVersion` in the same file. topf combines the two into the installer image of
+the `UnattendedInstallConfig` document it generates, so neither is copied anywhere by hand — see
+[How the installer image is resolved](#how-the-installer-image-is-resolved) under Cluster Upgrades.
 
 To get a bootable installer, open the factory, choose the same options (platform `bare-metal`, the
 `talosVersion` from `topf.yaml`, `amd64` with SecureBoot on, the two extensions above), and download
@@ -311,9 +309,9 @@ Both upgrades are mutating cluster operations — per this repo's rule (see `CLA
 
 1. Bump `talosVersion` in `talos/topf.yaml` to the target release.
 2. Render locally first, and grep the output for the installer image tag to confirm it actually
-   moved (no cluster contact) — see the
-   [gotcha](#gotcha-the-installer-image-tag-lives-in-a-patch-not-just-talosversion) below for why
-   this check matters:
+   moved (no cluster contact) — see
+   [How the installer image is resolved](#how-the-installer-image-is-resolved) below for
+   why this check matters:
 
    ```bash
    cd talos
@@ -356,22 +354,28 @@ Both upgrades are mutating cluster operations — per this repo's rule (see `CLA
 Talos upgrades never touch the running Kubernetes version (by design, since Talos v1.0) — see below
 if kubelet/control-plane components also need to move.
 
-#### Gotcha: the installer image tag lives in a patch, not just `talosVersion`
+#### How the installer image is resolved
 
-This cluster keeps the legacy `machine.install` form (and deletes topf's auto-generated
-`UnattendedInstallConfig` via `all/00-unattended-install-delete.yaml`), so the installer image that
-ends up in the rendered config is whatever `talos/all/01-install-disk.yaml.tpl` says — topf does not
-rewrite it from `talosVersion`. The tag is templated (`:{{ .TalosVersion }}`) so a `topf.yaml` bump
-carries through; the schematic ID before it is a literal and must be updated by hand if
-`talos/schematic.yaml` changes.
+topf generates an `UnattendedInstallConfig` document per node, with `installer.image` built from
+`talosVersion` + `schematicId` + `secureboot` in `talos/topf.yaml`. `topf upgrade` reads its target
+from the rendered config (`machine.install.image` if present, otherwise that document's
+`installer.image`), so bumping `talosVersion` is all an upgrade needs. The only override is
+`talos/all/01-unattended-install.yaml`, which sets the disk selector: topf's placeholder
+`disk.dev_path == "/dev/sda"` would match an attached Longhorn iSCSI volume on these nodes, so it
+selects `disk.transport == "nvme"` instead (each node has exactly one NVMe disk). The document only
+matters at install time; an installed node reports the install as complete and never re-runs it.
 
-History: until 2026-10-12 that patch was a plain `.yaml` with the tag hardcoded to `:v1.14.0`.
+Don't reintroduce `machine.install`: if it's present, `topf upgrade` takes its image first, and
+that's how the bug below happened.
+
+History: until 2026-10-12 the cluster used the legacy `machine.install` form (deleting topf's
+generated document), with the image tag hardcoded to `:v1.14.0` in a patch.
 Bumping `talosVersion` to `v1.14.1` then silently kept rendering `:v1.14.0` and `topf upgrade
 --dry-run` reported "no upgrade required". This was first misdiagnosed as `topf` `v0.6.0` lacking
 `v1.14.1` machinery support, and `talosVersion` sat pinned at `v1.14.0` waiting for a stable `topf`
 `v0.6.1` — but rendering with `v0.6.1` still produced `:v1.14.0`, which exposed the hardcoded tag
-as the real cause. Retiring `machine.install` in favour of `UnattendedInstallConfig` (tracked in
-[#91](https://github.com/dyegoe/homelab/issues/91)) would remove this footgun entirely.
+as the real cause. The tag was templated as a stopgap, then `machine.install` was retired in favour
+of `UnattendedInstallConfig` the same day ([#91](https://github.com/dyegoe/homelab/issues/91)).
 
 #### Known issue: kexec reboot can hang a node during upgrade (recheck on the next Talos upgrade)
 

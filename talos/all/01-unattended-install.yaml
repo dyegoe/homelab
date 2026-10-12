@@ -1,0 +1,14 @@
+---
+# Merged into the UnattendedInstallConfig that topf generates from talosVersion + schematicId +
+# secureboot (so the installer image, and the tag `topf upgrade` targets, always follows
+# topf.yaml; no image line here). Only the disk selection needs overriding: topf's placeholder is
+# `disk.dev_path == "/dev/sda"`, which on these nodes would match an attached Longhorn iSCSI volume
+# (they show up as /dev/sd*). Each node has exactly one NVMe disk (the install disk), so select by
+# transport instead of a per-node serial. Only used at install time: an already-installed node
+# reports the install as complete and never re-runs it.
+apiVersion: v1alpha1
+kind: UnattendedInstallConfig
+provisioning:
+  diskSelector:
+    match: disk.transport == "nvme"
+  wipe: false
