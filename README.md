@@ -1447,16 +1447,22 @@ not explicitly sent to `null` reaches Telegram, so `severity` is informational.
 ### Metrics dashboards
 
 Grafana comes with kube-prometheus-stack's bundled dashboards (Kubernetes cluster/node/pod views,
-CoreDNS, etcd, etc.) under **Dashboards**. Two known gaps, not bugs to chase if rediscovered:
+CoreDNS, etcd, etc.) under **Dashboards**. One known gap, not a bug to chase if rediscovered:
 
 - The Alertmanager Grafana datasource plugin ships with `autoEnabled: false`, so it 500s with
   `plugin.unavailable` when viewed through Grafana. Alertmanager's own UI works fine standalone
   ([#98](https://github.com/dyegoe/homelab/issues/98), not planned).
-- The bundled "kubernetes-mixin" dashboards (Compute Resources: Namespace/Pod/Workload) key off a
-  `cluster` label that a standalone, non-federated Prometheus like this one never sets on locally-queried
-  series (`externalLabels` only affects federation/remote-write/Alertmanager metadata, not local
-  queries) — accepted as a known gap rather than adding `metricRelabelings` to every `ServiceMonitor`
-  across every addon ([#97](https://github.com/dyegoe/homelab/issues/97), not planned).
+
+**The `cluster` label**: the bundled "kubernetes-mixin" dashboards (Compute Resources: Namespace/Pod/
+Workload, …) key off a hidden `$cluster` variable sourced from a `cluster` label on scraped series.
+`externalLabels` doesn't provide it, because it only labels data leaving Prometheus (alerts,
+federation, remote-write). A default Prometheus Operator **scrape class**
+(`prometheus.prometheusSpec.scrapeClasses`, `default: true`) relabels `cluster: k8s.nodes.ee` onto
+every ServiceMonitor/PodMonitor target in one place, so no addon's monitor needs editing. Two
+exceptions set the same value themselves: the raw `kube-etcd` scrape job (scrape classes don't apply
+to `additionalScrapeConfigs`), and Loki's chart, whose ServiceMonitor would otherwise relabel
+`cluster` to its release name (`clusterLabelOverride` in `addons/loki/helm/values.yaml`)
+([#97](https://github.com/dyegoe/homelab/issues/97)).
 
 **etcd** is a native Talos host service, not a Kubernetes workload, so there's no pod for the chart's
 default `component: etcd` selector to match. `talos/control-plane/08-etcd-metrics.yaml` opens a

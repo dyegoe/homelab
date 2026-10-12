@@ -42,12 +42,23 @@ prometheus:
     # for the link to actually resolve when tapped from Telegram.
     externalUrl: https://prometheus.nodes.ee
     retention: 15d
-    # The bundled "kubernetes-mixin" dashboards (Compute Resources / Namespace, Pod, Workload, ...)
-    # all key off a hidden $cluster template variable sourced from this label. Without it, every
-    # metric has no `cluster` label at all, the variable resolves to nothing, and those panels
-    # show "No data" even though the underlying data is fine.
+    # externalLabels only label data leaving this Prometheus (alerts sent to Alertmanager,
+    # federation, remote-write). Locally queried series don't get it, so it alone doesn't feed
+    # the kubernetes-mixin dashboards' $cluster variable. That's the scrapeClasses entry below.
     externalLabels:
       cluster: k8s.nodes.ee
+    # A default scrape class applies to every ServiceMonitor/PodMonitor/Probe/ScrapeConfig without
+    # editing each one, so this stamps `cluster: k8s.nodes.ee` on every scraped series. The bundled
+    # "kubernetes-mixin" dashboards (Compute Resources / Namespace, Pod, Workload, ...) key off a
+    # hidden $cluster variable sourced from that label (`label_values(up{job=...}, cluster)`); without
+    # it the variable has no values (#97). Raw additionalScrapeConfigs don't get scrape classes, so the
+    # kube-etcd job below sets the same label itself. Keep the value in sync with externalLabels.
+    scrapeClasses:
+      - name: default
+        default: true
+        relabelings:
+          - targetLabel: cluster
+            replacement: k8s.nodes.ee
     # nil selectors would otherwise only pick up ServiceMonitors/PodMonitors/PrometheusRules
     # labeled `release: kube-prometheus-stack` - every other addon's ServiceMonitor (cilium,
     # cert-manager, external-dns, onepassword, longhorn, cloudflared) is unlabeled, so this has
@@ -64,12 +75,15 @@ prometheus:
         static_configs:
           - targets: ["172.31.86.11:2381"]
             labels:
+              cluster: k8s.nodes.ee
               node: kihnu
           - targets: ["172.31.86.12:2381"]
             labels:
+              cluster: k8s.nodes.ee
               node: muhu
           - targets: ["172.31.86.13:2381"]
             labels:
+              cluster: k8s.nodes.ee
               node: ruhnu
     # Carried over as-is from the old stack, which validated it at 7d retention and a smaller
     # ServiceMonitor count than we have here (15d, plus Cilium/Hubble/envoy/operator metrics on

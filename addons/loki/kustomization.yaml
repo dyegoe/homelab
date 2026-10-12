@@ -6,7 +6,7 @@ kind: Kustomization
 # "1" in any namespace. Hand-built rather than ported from the official grafana/loki loki-mixin: the
 # mixin's dashboards (reads/writes/chunks/etc.) are written for a microservices-split deployment and
 # key panels off recording rules (cluster_job_route:*:sum_rate) this cluster doesn't deploy, plus a
-# "cluster" label this Prometheus never sets. Not worth the invasive fix for a SingleBinary homelab
+# "cluster" label Prometheus didn't set at the time (it does now, #97). Not worth the invasive fix for a SingleBinary homelab
 # deployment - this dashboard covers the same operational signals (request rate/latency, ingestion,
 # discards, chunk flush, query latency) with panels verified against live Prometheus metric names.
 configMapGenerator:
