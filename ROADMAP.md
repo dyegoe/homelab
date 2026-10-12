@@ -1,7 +1,7 @@
 # Roadmap
 
 - Adopt `UnattendedInstallConfig` (replaces the legacy `machine.install` form kept in
-  `talos/all/01-install-disk.yaml` during the topf migration for a clean diff) — remove the
+  `talos/all/01-install-disk.yaml.tpl` during the topf migration for a clean diff) — remove the
   matching `all/00-unattended-install-delete.yaml` override once done.
 - Consider enabling `SecurityProfileConfig.workloadIsolation` (currently pinned `false` in
   `talos/all/03-security-profile.yaml` to match pre-migration behavior) — sandboxd workload
