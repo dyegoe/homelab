@@ -5,6 +5,9 @@
 # and /health, not the etcd API, so it needs no client certs; the nodes are on a private VLAN.
 # Without this, Talos v1.14 serves metrics only on port 2383 behind etcd client mTLS (#96).
 # No typed document covers etcd yet, so this uses the legacy cluster.etcd section.
+# Applying needs a reboot to take effect: topf reports "applied without a reboot", but Talos
+# doesn't restart etcd on a spec change, and `talosctl service etcd restart` is refused. Reboot one
+# node at a time with `talosctl reboot --mode powercycle` (#90).
 cluster:
   etcd:
     extraArgs:
