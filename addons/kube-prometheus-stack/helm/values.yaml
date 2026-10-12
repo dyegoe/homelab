@@ -10,18 +10,20 @@ crds:
 # KubeControllerManagerConfig/KubeSchedulerConfig `extraArgs: bind-address: 0.0.0.0` patch is
 # added to talos/control-plane/ (see 04-kube-controller-manager.yaml, 05-kube-scheduler.yaml) and
 # applied. Left enabled since a down target is harmless.
-# etcd is a native Talos host service, not a Kubernetes pod, so there is nothing for the default
-# `component: etcd` selector to match. Instead, list the node IPs: the chart then creates a
-# selector-less Service plus Endpoints in kube-system pointing at them. Port 2381 (chart default,
-# plain HTTP) is the metrics listener opened by talos/control-plane/08-etcd-metrics.yaml. The
-# kubeEtcd toggle also enables the chart's bundled etcd dashboard and alert rules (#96).
-# Keep this list in sync with talos/topf.yaml when nodes change.
+# etcd is a native Talos host service, not a Kubernetes pod, so there is nothing for the chart's
+# default `component: etcd` selector to match. The chart's alternative (`kubeEtcd.endpoints`, a
+# selector-less Service plus a v1 Endpoints object) doesn't work here: ArgoCD's default
+# `resource.exclusions` in argocd-cm drops Endpoints/EndpointSlice, so the Endpoints never get
+# created and the Service has no targets. Instead, the Service/ServiceMonitor are off and etcd is
+# scraped by a static job (`kube-etcd` under prometheus.prometheusSpec.additionalScrapeConfigs
+# below). `kubeEtcd.enabled` stays true because it is also what turns on the chart's bundled etcd
+# dashboard and alert rules, which select `job=~".*etcd.*"` (#96).
 kubeEtcd:
   enabled: true
-  endpoints:
-    - 172.31.86.11 # kihnu
-    - 172.31.86.12 # muhu
-    - 172.31.86.13 # ruhnu
+  service:
+    enabled: false
+  serviceMonitor:
+    enabled: false
 # No kube-proxy on this cluster - Cilium runs in kube-proxy-less mode (see addons/cilium).
 kubeProxy:
   enabled: false
@@ -54,6 +56,21 @@ prometheus:
     podMonitorSelectorNilUsesHelmValues: false
     probeSelectorNilUsesHelmValues: false
     ruleSelectorNilUsesHelmValues: false
+    # etcd's plain-HTTP metrics listener on each node, opened by
+    # talos/control-plane/08-etcd-metrics.yaml (see the kubeEtcd comment above for why this is a
+    # static job). Keep the targets in sync with talos/topf.yaml when nodes change.
+    additionalScrapeConfigs:
+      - job_name: kube-etcd
+        static_configs:
+          - targets: ["172.31.86.11:2381"]
+            labels:
+              node: kihnu
+          - targets: ["172.31.86.12:2381"]
+            labels:
+              node: muhu
+          - targets: ["172.31.86.13:2381"]
+            labels:
+              node: ruhnu
     # Carried over as-is from the old stack, which validated it at 7d retention and a smaller
     # ServiceMonitor count than we have here (15d, plus Cilium/Hubble/envoy/operator metrics on
     # top). Watch actual usage and raise the limit if Prometheus starts getting OOMKilled.
