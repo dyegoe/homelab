@@ -10,9 +10,18 @@ crds:
 # KubeControllerManagerConfig/KubeSchedulerConfig `extraArgs: bind-address: 0.0.0.0` patch is
 # added to talos/control-plane/ (see 04-kube-controller-manager.yaml, 05-kube-scheduler.yaml) and
 # applied. Left enabled since a down target is harmless.
-# etcd is a native Talos host service, not a Kubernetes pod, so it isn't scraped here.
+# etcd is a native Talos host service, not a Kubernetes pod, so there is nothing for the default
+# `component: etcd` selector to match. Instead, list the node IPs: the chart then creates a
+# selector-less Service plus Endpoints in kube-system pointing at them. Port 2381 (chart default,
+# plain HTTP) is the metrics listener opened by talos/control-plane/08-etcd-metrics.yaml. The
+# kubeEtcd toggle also enables the chart's bundled etcd dashboard and alert rules (#96).
+# Keep this list in sync with talos/topf.yaml when nodes change.
 kubeEtcd:
-  enabled: false
+  enabled: true
+  endpoints:
+    - 172.31.86.11 # kihnu
+    - 172.31.86.12 # muhu
+    - 172.31.86.13 # ruhnu
 # No kube-proxy on this cluster - Cilium runs in kube-proxy-less mode (see addons/cilium).
 kubeProxy:
   enabled: false

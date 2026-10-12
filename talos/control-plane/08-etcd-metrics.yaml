@@ -1,0 +1,11 @@
+---
+# Expose etcd's Prometheus metrics on a plain-HTTP listener (port 2381) so kube-prometheus-stack
+# can scrape it (kubeEtcd in addons/kube-prometheus-stack/helm/values.yaml). etcd is a Talos host
+# service, not a pod, so this has to happen at the Talos level. The listener serves only /metrics
+# and /health, not the etcd API, so it needs no client certs; the nodes are on a private VLAN.
+# Without this, Talos v1.14 serves metrics only on port 2383 behind etcd client mTLS (#96).
+# No typed document covers etcd yet, so this uses the legacy cluster.etcd section.
+cluster:
+  etcd:
+    extraArgs:
+      listen-metrics-urls: http://0.0.0.0:2381
