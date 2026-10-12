@@ -3,6 +3,11 @@
 # a 3-node homelab, not the tens-of-GB/day scale SimpleScalable/Distributed modes are built for.
 deploymentMode: SingleBinary
 
+# The chart's ServiceMonitor relabels `cluster` to this value, defaulting to the release name
+# ("loki"). Match the cluster-wide label that kube-prometheus-stack's default scrape class sets, so
+# Loki's series don't carry a second, different cluster value (#97).
+clusterLabelOverride: k8s.nodes.ee
+
 loki:
   auth_enabled: false
   commonConfig:
