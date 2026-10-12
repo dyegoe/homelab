@@ -1447,7 +1447,7 @@ not explicitly sent to `null` reaches Telegram, so `severity` is informational.
 ### Metrics dashboards
 
 Grafana comes with kube-prometheus-stack's bundled dashboards (Kubernetes cluster/node/pod views,
-CoreDNS, etc.) under **Dashboards**. Three known gaps, not bugs to chase if rediscovered:
+CoreDNS, etcd, etc.) under **Dashboards**. Two known gaps, not bugs to chase if rediscovered:
 
 - The Alertmanager Grafana datasource plugin ships with `autoEnabled: false`, so it 500s with
   `plugin.unavailable` when viewed through Grafana. Alertmanager's own UI works fine standalone
@@ -1457,10 +1457,15 @@ CoreDNS, etc.) under **Dashboards**. Three known gaps, not bugs to chase if redi
   series (`externalLabels` only affects federation/remote-write/Alertmanager metadata, not local
   queries) — accepted as a known gap rather than adding `metricRelabelings` to every `ServiceMonitor`
   across every addon ([#97](https://github.com/dyegoe/homelab/issues/97), not planned).
-- etcd has no metrics or dashboard at all — it's a native Talos host service, not a Kubernetes workload,
-  so there's no pod/Service for a `ServiceMonitor` to target. Wiring it up would need Talos-level exposure
-  of etcd's metrics endpoint plus a scrape config, which hasn't been done. Accepted as a known gap, not
-  planned unless a concrete need for etcd visibility comes up ([#96](https://github.com/dyegoe/homelab/issues/96)).
+
+**etcd** is a native Talos host service, not a Kubernetes workload, so there's no pod for the chart's
+default `component: etcd` selector to match. `talos/control-plane/08-etcd-metrics.yaml` opens a
+plain-HTTP metrics listener on each node (`listen-metrics-urls: http://0.0.0.0:2381`; Talos v1.14 otherwise
+serves metrics only on port 2383 behind etcd client mTLS), and `kubeEtcd.endpoints` in the chart values lists
+the three node IPs, so the chart creates a selector-less Service plus `Endpoints` in `kube-system` for its
+`ServiceMonitor`. The same `kubeEtcd` toggle turns on the chart's bundled etcd dashboard and alert rules.
+Keep `kubeEtcd.endpoints` in sync with `talos/topf.yaml` when nodes change
+([#96](https://github.com/dyegoe/homelab/issues/96)).
 
 Every addon with a live Prometheus target also ships its own dashboard(s), as a `ConfigMap` labeled
 `grafana_dashboard: "1"` in `addons/<name>/dashboards/` (auto-discovered by Grafana's sidecar, which has
