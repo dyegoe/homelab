@@ -1,8 +1,0 @@
----
-# Pilot for #92: workload isolation (sandboxd) on ruhnu only, overriding all/03-security-profile.yaml.
-# ruhnu is the pilot because no Longhorn volume is attached there, so a broken iSCSI path only fails
-# the test volume. Once Longhorn attach/detach, Cilium and node-exporter are verified here, flip
-# all/03 to true and delete this folder. Needs a reboot to take effect (sandboxd reads it at start).
-apiVersion: v1alpha1
-kind: SecurityProfileConfig
-workloadIsolation: true
