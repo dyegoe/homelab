@@ -1,8 +1,10 @@
 ---
+# Workload isolation (sandboxd): CRI containerd, the kubelet and all pods run in a dedicated PID +
+# mount namespace, isolated from machined (PID 1). Default for fresh Talos 1.14 configs; this cluster
+# reached 1.14 by in-place upgrade, so it was off until #92 (piloted on ruhnu 2026-10-12: Longhorn
+# iSCSI attach/detach, Cilium and metrics all verified inside the sandbox). Only read when sandboxd
+# starts, so changing it needs a reboot; `topf apply` alone reports "no reboot" and changes nothing.
+# Side effect: hostPID pods (node-exporter) only see sandbox processes, not host services.
 apiVersion: v1alpha1
 kind: SecurityProfileConfig
-workloadIsolation: false # talosctl gen config defaults this to true on fresh generation (sandboxd
-# workload isolation), but this cluster reached v1.14 via in-place `talosctl upgrade`, not a full config
-# regen, so it never had this enabled. Keep it off here to match current behavior; adopting it is a
-# separate, deliberate decision (https://github.com/dyegoe/homelab/issues/92) — a documented failure mode exists for LUKS-encrypted
-# EPHEMERAL volumes failing to close on the first reboot after flipping this on.
+workloadIsolation: true
