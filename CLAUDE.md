@@ -29,10 +29,11 @@ from [Renovate](https://docs.renovatebot.com/) (see `renovate.json`).
   control-plane). A `.tpl` suffix enables Go templating (`{{ .Node.Host }}`, `{{ .KubernetesVersion }}`,
   etc.) — see `topf`'s own `configuration-model.md` docs for the full template context.
   `$patch: delete` on a document (or a specific map key, e.g. one taint) removes something `topf`
-  auto-generates by default — used here for `UnattendedInstallConfig` (keeping the legacy
-  `machine.install` form, since the disk/image/wipe fields still work and this cluster predates the
-  newer typed doc) and `KubeletConfig` (keeping legacy `machine.kubelet`, since the typed doc has no
-  equivalent for `extraMounts`, needed for Longhorn's bind mount).
+  auto-generates by default — used here for `KubeletConfig` (keeping legacy `machine.kubelet`, since
+  the typed doc has no equivalent for `extraMounts`, needed for Longhorn's bind mount). A patch
+  document with the same `kind` and no `$patch` merges into the generated one instead — e.g.
+  `all/01-unattended-install.yaml` only overrides the install-disk selector of topf's generated
+  `UnattendedInstallConfig`, whose installer image topf derives from `talosVersion` + schematic.
 - There is no generated-output directory to gitignore — `topf render -o <dir>` writes to whatever
   directory you point it at (for local inspection only, never commit it), and `topf apply` talks to
   the live nodes directly without an intermediate generated-file step.
