@@ -76,7 +76,8 @@ ROADMAP.md        # deferred and considered changes
     - [Network CNI](#network-cni)
   - [Cluster Upgrades](#cluster-upgrades)
     - [Upgrading Talos Linux](#upgrading-talos-linux)
-      - [Known issue: topf 0.6.0 can't render Talos past v1.14.0](#known-issue-topf-060-cant-render-talos-past-v1140)
+      - [Gotcha: the installer image tag lives in a patch, not just `talosVersion`](#gotcha-the-installer-image-tag-lives-in-a-patch-not-just-talosversion)
+      - [Known issue: kexec reboot can hang a node during upgrade (recheck on the next Talos upgrade)](#known-issue-kexec-reboot-can-hang-a-node-during-upgrade-recheck-on-the-next-talos-upgrade)
     - [Upgrading Kubernetes](#upgrading-kubernetes)
   - [GitOps](#gitops)
     - [Architecture](#architecture)
@@ -148,8 +149,12 @@ ROADMAP.md        # deferred and considered changes
 The installer image comes from the [Talos Image Factory](https://factory.talos.dev/), built from
 `talos/schematic.yaml`: bare-metal, `amd64`, SecureBoot, plus the `siderolabs/iscsi-tools` and
 `siderolabs/util-linux-tools` system extensions Longhorn needs. `topf` hashes that file into the
-schematic ID itself (`schematicId: "@schematic.yaml"` in `talos/topf.yaml`), so the ID never has to
-be copied around by hand; the Talos release to pair it with is `talosVersion` in the same file.
+schematic ID itself (`schematicId: "@schematic.yaml"` in `talos/topf.yaml`); the Talos release to
+pair it with is `talosVersion` in the same file. One exception: the legacy `machine.install.image`
+in `talos/all/01-install-disk.yaml.tpl` carries the schematic ID as a literal (topf doesn't expose
+it to patch templates), so a `schematic.yaml` change also means updating that hash by hand — see the
+[gotcha](#gotcha-the-installer-image-tag-lives-in-a-patch-not-just-talosversion) under
+Cluster Upgrades.
 
 To get a bootable installer, open the factory, choose the same options (platform `bare-metal`, the
 `talosVersion` from `topf.yaml`, `amd64` with SecureBoot on, the two extensions above), and download
@@ -296,8 +301,9 @@ Both upgrades are mutating cluster operations — per this repo's rule (see `CLA
 
 1. Bump `talosVersion` in `talos/topf.yaml` to the target release.
 2. Render locally first, and grep the output for the installer image tag to confirm it actually
-   moved (no cluster contact) — see the [Known issue](#known-issue-topf-060-cant-render-talos-past-v1140)
-   below before trusting this blindly:
+   moved (no cluster contact) — see the
+   [gotcha](#gotcha-the-installer-image-tag-lives-in-a-patch-not-just-talosversion) below for why
+   this check matters:
 
    ```bash
    cd talos
@@ -311,18 +317,22 @@ Both upgrades are mutating cluster operations — per this repo's rule (see `CLA
    topf upgrade --dry-run
    ```
 
-4. Apply for real:
+4. Apply for real, with a full firmware reboot instead of kexec (see the
+   [known issue](#known-issue-kexec-reboot-can-hang-a-node-during-upgrade-recheck-on-the-next-talos-upgrade)
+   below), and be near the hardware while it runs:
 
    ```bash
-   topf upgrade
+   topf upgrade --reboot-mode powercycle
    ```
 
-   `topf` resolves the installer image from `talosVersion` plus the schematic ID
-   (`talos/schematic.yaml`), then upgrades nodes one at a time by default
+   `topf` upgrades nodes one at a time by default
    (`--max-parallel`, though control-plane nodes are always sequential regardless — this cluster has
    no `worker/` role to parallelize), draining and cordoning each node first, waiting for it to
    reboot and stabilize (`--stabilization-duration`, default `30s`) before moving to the next.
-   Talos's A-B image scheme rolls a node back automatically if it fails to boot into the new version.
+   Talos's A-B image scheme rolls a node back automatically if it fails to boot into the new version
+   — but only once the new kernel is actually running; a hang before that (firmware, or a stuck
+   kexec) needs a hard power-cycle. etcd keeps quorum with one node down, so stop `topf` (Ctrl-C)
+   before it moves on to the next node, then power-cycle the stuck one.
 
 5. Verify every node landed on the new version:
 
@@ -336,20 +346,43 @@ Both upgrades are mutating cluster operations — per this repo's rule (see `CLA
 Talos upgrades never touch the running Kubernetes version (by design, since Talos v1.0) — see below
 if kubelet/control-plane components also need to move.
 
-#### Known issue: topf 0.6.0 can't render Talos past v1.14.0
+#### Gotcha: the installer image tag lives in a patch, not just `talosVersion`
 
-`topf` resolves the installer image tag from its own vendored `siderolabs/talos` machinery, not by
-templating the `talosVersion` string directly — so a binary that predates a given Talos release
-silently keeps rendering the last version it knows, ignoring a newer `talosVersion` in `topf.yaml`
-with no error. `topf` `v0.6.0` (`topf --version` reports `topf version 0.6.0 (Talos v1.14.0)`) hit
-this on `v1.14.1`: `topf render` kept emitting the `:v1.14.0` installer tag and `topf upgrade
---dry-run` reported "no upgrade required" even though the live nodes were genuinely still on
-`v1.14.0` (confirmed via `talosctl version`, whose client binary had separately been upgraded to
-`v1.14.1`). Filed upstream: machinery support for `v1.14.1` landed in
-[`postfinance/topf` `v0.6.1-rc.0`/`rc.1`](https://github.com/postfinance/topf/releases) (Sep 16/23,
-2026), but no stable `v0.6.1` yet as of 2026-09-27. Until one ships, `talosVersion` in
-`talos/topf.yaml` stays pinned at `v1.14.0` — **recheck when `postfinance/topf` cuts a stable
-`v0.6.1`** (or later) release, then retry the `v1.14.1` bump.
+This cluster keeps the legacy `machine.install` form (and deletes topf's auto-generated
+`UnattendedInstallConfig` via `all/00-unattended-install-delete.yaml`), so the installer image that
+ends up in the rendered config is whatever `talos/all/01-install-disk.yaml.tpl` says — topf does not
+rewrite it from `talosVersion`. The tag is templated (`:{{ .TalosVersion }}`) so a `topf.yaml` bump
+carries through; the schematic ID before it is a literal and must be updated by hand if
+`talos/schematic.yaml` changes.
+
+History: until 2026-10-12 that patch was a plain `.yaml` with the tag hardcoded to `:v1.14.0`.
+Bumping `talosVersion` to `v1.14.1` then silently kept rendering `:v1.14.0` and `topf upgrade
+--dry-run` reported "no upgrade required". This was first misdiagnosed as `topf` `v0.6.0` lacking
+`v1.14.1` machinery support, and `talosVersion` sat pinned at `v1.14.0` waiting for a stable `topf`
+`v0.6.1` — but rendering with `v0.6.1` still produced `:v1.14.0`, which exposed the hardcoded tag
+as the real cause. Retiring `machine.install` in favour of `UnattendedInstallConfig` (see
+`ROADMAP.md`) would remove this footgun entirely.
+
+#### Known issue: kexec reboot can hang a node during upgrade (recheck on the next Talos upgrade)
+
+By default `topf upgrade` (like `talosctl upgrade`) reboots into the new version via `kexec`, jumping
+straight from the old kernel to the new one without going through firmware. During the
+`v1.14.0` → `v1.14.2` upgrade on 2026-10-12, `kihnu` kexec'd fine (back and Ready within seconds),
+but `muhu` never came back: black screen, no ARP/ping, Talos API unreachable, for ~40 minutes until
+a hard power-button reset. It then booted `v1.14.2` cleanly, with no errors in `dmesg`, so the
+upgrade itself was fine and the hang happened in the reboot handoff. The hung boot's own logs were
+lost (Talos doesn't keep logs from previous boots), so kexec is the **suspected, not proven**
+cause. A hang right after kexec with a black screen is a known failure mode on some
+firmware/GPU/NIC combinations. The nodes aren't identical hardware: `kihnu` is an HP EliteDesk 800
+G2 DM 65W (BIOS 02.47), `muhu` the 35W model (BIOS 02.63), `ruhnu` a Lenovo `10MUS0J600`. `ruhnu`
+was then upgraded with `--reboot-mode powercycle` without issue.
+
+Until there's evidence kexec is reliable on all three, upgrade with `--reboot-mode powercycle`
+(step 4 above). It adds a minute or two per node. **Recheck on the next Talos upgrade**: if you want
+to test kexec again, upgrade `muhu` alone (`--nodes-filter muhu`) with the default reboot mode, with
+someone at the console. If it hangs again, consider making it permanent with a
+`kernel.kexec_load_disabled: "1"` sysctl patch under `talos/all/`, which forces a full reboot for
+every reboot, not just upgrades.
 
 ### Upgrading Kubernetes
 
