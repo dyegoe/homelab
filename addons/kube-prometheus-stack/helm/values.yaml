@@ -220,9 +220,13 @@ grafana:
       # cpu limit was 100m - CPUThrottlingHigh fired at 70-75% throttled periods. Same burst-vs-limit
       # mismatch as node-exporter below, made worse by this session's dashboard-porting work: the
       # sidecar now diffs ~10 more ConfigMaps across every namespace (searchNamespace: ALL).
-      # First bump (100m -> 300m) helped (75% -> 39%) but wasn't enough on its own.
+      # First bump (100m -> 300m) helped (75% -> 39%) but wasn't enough on its own. Second bump
+      # (300m -> 500m) held at ~10% for two weeks, then settled at ~26-30% after the pod was
+      # rescheduled during the 2026-10-12 Talos v1.14.2 upgrade - still ~2m avg / ~5m peak usage, so
+      # pure burst-vs-quota again (the watch reconnects every 60s). Jumped to 1000m like
+      # node-exporter, which dropped to ~0% throttled at that value.
       limits:
-        cpu: 500m
+        cpu: 1000m
         memory: 256Mi
   # Chart default is RollingUpdate, which starts the new pod before killing the old one - that
   # deadlocks against a single ReadWriteOnce Longhorn PVC (can't attach to two pods at once) and
