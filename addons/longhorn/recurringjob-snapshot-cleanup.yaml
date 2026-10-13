@@ -1,0 +1,16 @@
+---
+# Re-prunes the removed system snapshot a replica rebuild leaves under volume-head. Longhorn never
+# retries that prune on its own, so the volume's actualSize grows toward 2x as the workload rewrites
+# blocks (see README's "Known issue: removed system snapshot..." and #93). Every volume carries the
+# recurring-job-group.longhorn.io/default label, so the default group covers all of them.
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: snapshot-cleanup-nightly
+spec:
+  task: snapshot-cleanup
+  cron: "0 3 * * *"
+  groups:
+    - default
+  retain: 0
+  concurrency: 1
