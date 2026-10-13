@@ -1531,7 +1531,8 @@ trigger fired with the upgrade to `v1.37.0` and the recheck confirmed the fix.
 
 ### Known issue: removed system snapshot never purged, volume uses ~2x its size (recheck on the next Longhorn upgrade or replica rebuild)
 
-**Status: open, root cause of the stall unknown, fixed by hand when it recurs.** Tracked in
+**Status: open, mitigated by a nightly `snapshot-cleanup` RecurringJob (see Mitigation below); why
+Longhorn never re-prunes on its own is still unknown.** Tracked in
 [#93](https://github.com/dyegoe/homelab/issues/93), which also has the evidence from the **2026-10-12 recurrence** (every volume left with a
 removed-but-unmerged base snapshot after the Talos upgrade's replica rebuilds). On 2026-09-30 the
 Prometheus volume (`pvc-4d4454f9-99b0-409e-bd4f-43dd9158143b`, 50 GiB) showed an actual size of
@@ -1547,7 +1548,15 @@ overlapping chunks from volume-snap-…`) with no completion line, then the repl
 09-06 and both replicas were replaced by the v1.12.1 → v1.13.0 live engine upgrade on 09-30 — either
 could have interrupted it. There was no error anywhere and the engine's `purgeStatus` was idle, and
 `auto-cleanup-system-generated-snapshot` was already `true`, so _why_ nothing retried is not known.
-There are no `RecurringJob`s in the cluster, so this was not a job.
+At the time there were no `RecurringJob`s in the cluster, so nothing scheduled a retry either.
+
+**The leftover snapshot itself is expected** (learned on the 2026-10-13 recurrence): when the removed
+snapshot is the only one under `volume-head`, Longhorn cannot coalesce it into the live head, so a
+purge _prunes_ it instead — it drops the blocks the head has since overwritten and keeps the rest.
+How much it shrinks depends only on how much of it the workload has rewritten: ~all of it by 09-30
+(50.7 GB → 1.2 GB), ~5 GB a day after the 10-12 rebuild (52.35 GB → 47.23 GB). The actual defect
+is that nothing re-prunes it, so the double-counting grows back at the workload's rewrite rate
+(Prometheus: ~300 MB/h, 52.4 → 57.5 GB in the 24 h after the rebuild).
 
 **Symptom to look for**: `actualSize` ≈ 2x `spec.size`, plus a snapshot with `markRemoved: true` and
 `readyToUse: false`:
@@ -1570,12 +1579,23 @@ kubectl -n longhorn-system get engines.longhorn.io <pvc-name>-e-0 -o jsonpath='{
 ```
 
 Result on 2026-09-30: `actualSize` went from 101.77 GB to 52.31 GB (48.7 GiB) and the stuck snapshot
-shrank from 50.7 GB to 1.2 GB.
+shrank from 50.7 GB to 1.2 GB. On 2026-10-13: 57.50 GB → 52.38 GB, snapshot 52.35 GB → 47.23 GB
+(still present, `markRemoved: true` — see above, that is expected).
+
+**Mitigation**: [`addons/longhorn/recurringjob-snapshot-cleanup.yaml`](addons/longhorn/recurringjob-snapshot-cleanup.yaml)
+runs Longhorn's `snapshot-cleanup` task (purge removed and system snapshots) nightly at 03:00 for the
+`default` recurring-job group, which every volume is in
+(`recurring-job-group.longhorn.io/default: enabled`). That turns the manual purge above into a
+daily one, so the most a volume should over-count is about one day of rewrites. Check it ran:
+
+```bash
+kubectl -n longhorn-system get cronjobs,jobs | grep snapshot-cleanup
+```
 
 **Recheck when**: the next Longhorn chart bump (Renovate PR) or the next replica rebuild/engine
-upgrade — rerun the two detection commands afterwards. If it recurs, capture the engine's
-`status.purgeStatus` and the instance-manager log around the snapshot removal before purging, since
-the stall itself was never diagnosed, then file it upstream at
+upgrade — rerun the two detection commands the morning after. If `actualSize` is still well over
+1x after a nightly run, the job is not doing the purge: capture the engine's
+`status.purgeStatus` and the instance-manager log around the job, then file it upstream at
 [longhorn/longhorn](https://github.com/longhorn/longhorn/issues) and record the link here.
 
 ## Bootstrap sequence summary
