@@ -13,7 +13,7 @@ spec:
   source:
     repoURL: https://github.com/kubernetes-csi/external-snapshotter
     path: client/config/crd
-    targetRevision: v8.6.0
+    targetRevision: v8.7.0
   destination:
     server: https://kubernetes.default.svc
   syncPolicy:
