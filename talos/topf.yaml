@@ -2,7 +2,7 @@
 clusterName: k8s.nodes.ee
 clusterEndpoint: https://172.31.86.10:6443
 
-talosVersion: v1.14.2
+talosVersion: v1.14.4
 kubernetesVersion: v1.37.1
 
 schematicId: "@schematic.yaml"
