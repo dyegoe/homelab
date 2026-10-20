@@ -1,0 +1,17 @@
+# Cluster-scoped Omni config patch: plain-HTTP etcd metrics listener on :2381 for
+# kube-prometheus-stack (kubeEtcd). etcd is a Talos host service, not a pod, so this has to be set at
+# the Talos level (#96). Needs a node reboot to take effect, one node at a time (#90).
+metadata:
+  namespace: default
+  type: ConfigPatches.omni.sidero.dev
+  id: 120-k8s-nodes-ee-etcd-metrics
+  labels:
+    omni.sidero.dev/cluster: k8s-nodes-ee
+  annotations:
+    name: etcd metrics listener
+spec:
+  data: |
+    cluster:
+      etcd:
+        extraArgs:
+          listen-metrics-urls: http://0.0.0.0:2381

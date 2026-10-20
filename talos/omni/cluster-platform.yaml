@@ -1,0 +1,51 @@
+# Cluster-scoped Omni config patch: Kubernetes control-plane behaviour (replaces what the imported
+# per-machine "10-<uuid>" patches carried). Apply with `omnictl apply -f talos/omni/`.
+metadata:
+  namespace: default
+  type: ConfigPatches.omni.sidero.dev
+  id: 100-k8s-nodes-ee-platform
+  labels:
+    omni.sidero.dev/cluster: k8s-nodes-ee
+  annotations:
+    name: Platform (CNI, kube-proxy, scheduling, control-plane components)
+spec:
+  data: |
+    ---
+    apiVersion: v1alpha1
+    kind: KubeFlannelCNIConfig
+    $patch: delete # Cilium is the CNI
+    ---
+    apiVersion: v1alpha1
+    kind: KubeProxyConfig
+    enabled: false # Cilium replaces kube-proxy
+    ---
+    # All 3 nodes are control-plane with no workers: the default NoSchedule taint would make the
+    # cluster unschedulable.
+    apiVersion: v1alpha1
+    kind: KubeNodeConfig
+    taints:
+      $patch: delete
+    ---
+    # Prometheus scrapes these (kube-prometheus-stack kubeControllerManager/kubeScheduler).
+    apiVersion: v1alpha1
+    kind: KubeControllerManagerConfig
+    extraArgs:
+      bind-address: 0.0.0.0
+    ---
+    apiVersion: v1alpha1
+    kind: KubeSchedulerConfig
+    extraArgs:
+      bind-address: 0.0.0.0
+    ---
+    # Keep the VIP as the token issuer so existing service-account tokens stay valid.
+    apiVersion: v1alpha1
+    kind: KubeServiceAccountConfig
+    issuer:
+      issuerURL: https://172.31.86.10:6443
+    ---
+    # Omni points the cluster endpoint at its own address; keep the VIP in the apiserver cert,
+    # because Cilium and the workstation kubeconfig reach the API through it.
+    apiVersion: v1alpha1
+    kind: KubeAPIServerConfig
+    certExtraSANs:
+      - 172.31.86.10

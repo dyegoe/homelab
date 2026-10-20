@@ -4,7 +4,8 @@ A three-node bare-metal Kubernetes cluster on [Talos Linux](https://www.talos.de
 end from this repository: the Talos machine configs, every cluster addon, and multi-environment
 promotion for the applications it hosts. After the one-time bootstrap, a cluster change is a git
 commit — Talos machine-config changes are the main thing still pushed from a workstation
-(`topf apply`), and those come from files in this repo too.
+(`omnictl apply`, since the cluster joined [Omni](#omni-cluster-management)), and those come from
+files in this repo too.
 
 I run it to learn, and to have somewhere real to break things. It hosts my personal website and a
 couple of side projects, and this README doubles as the runbook I actually operate from, so it is
@@ -13,16 +14,16 @@ written down next to the thing they apply to.
 
 ## Stack at a glance
 
-| Layer         | What                                                                                             | Notes                                                                                                                                                    |
-| ------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OS            | Talos Linux, SecureBoot, all three nodes control-plane                                           | Machine configs rendered and applied with [`topf`](https://github.com/postfinance/topf) from `talos/topf.yaml`; the secrets bundle is SOPS/age-encrypted |
-| Networking    | Cilium (kube-proxy replacement, native routing), Gateway API, BGP peering with a Mikrotik router | LoadBalancer IPs are advertised over BGP, not L2                                                                                                         |
-| GitOps        | ArgoCD (self-managed), App-of-Apps for addons, ApplicationSet + `charts/tenant` for hosted apps  | [Renovate](https://docs.renovatebot.com/) opens the version-bump PRs                                                                                     |
-| Delivery      | Kargo + Argo Rollouts                                                                            | Warehouse → `dev` (automatic) → `prd` (manual approval), provisioned per app from one `config.json`                                                      |
-| Secrets       | External Secrets Operator backed by 1Password; Sealed Secrets for the single bootstrap token     | Reloader restarts consumers on rotation                                                                                                                  |
-| Edge          | cert-manager (Let's Encrypt, Cloudflare DNS-01), external-dns, Cloudflare Tunnel                 | Internal services share one wildcard cert, terminated at the Gateway                                                                                     |
-| Storage       | Longhorn, CloudNativePG                                                                          |                                                                                                                                                          |
-| Observability | kube-prometheus-stack, Loki, Alloy (pod logs + Talos host logs), Alertmanager → Telegram         | Addons with a live Prometheus target ship their own Grafana dashboard as a `ConfigMap`                                                                   |
+| Layer         | What                                                                                             | Notes                                                                                                                                                 |
+| ------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OS            | Talos Linux, SecureBoot, all three nodes control-plane                                           | Managed by [Omni](#omni-cluster-management) (SaaS, Hobby tier); config patches live in `talos/omni/`. `topf` files in `talos/` are archived reference |
+| Networking    | Cilium (kube-proxy replacement, native routing), Gateway API, BGP peering with a Mikrotik router | LoadBalancer IPs are advertised over BGP, not L2                                                                                                      |
+| GitOps        | ArgoCD (self-managed), App-of-Apps for addons, ApplicationSet + `charts/tenant` for hosted apps  | [Renovate](https://docs.renovatebot.com/) opens the version-bump PRs                                                                                  |
+| Delivery      | Kargo + Argo Rollouts                                                                            | Warehouse → `dev` (automatic) → `prd` (manual approval), provisioned per app from one `config.json`                                                   |
+| Secrets       | External Secrets Operator backed by 1Password; Sealed Secrets for the single bootstrap token     | Reloader restarts consumers on rotation                                                                                                               |
+| Edge          | cert-manager (Let's Encrypt, Cloudflare DNS-01), external-dns, Cloudflare Tunnel                 | Internal services share one wildcard cert, terminated at the Gateway                                                                                  |
+| Storage       | Longhorn, CloudNativePG                                                                          |                                                                                                                                                       |
+| Observability | kube-prometheus-stack, Loki, Alloy (pod logs + Talos host logs), Alertmanager → Telegram         | Addons with a live Prometheus target ship their own Grafana dashboard as a `ConfigMap`                                                                |
 
 Versions are pinned where ArgoCD and `topf` read them (`argocd/addons/*.yaml`,
 `argocd/install/kustomization.yaml`, `talos/topf.yaml`), not repeated here — Renovate keeps those
@@ -52,7 +53,7 @@ If you are here to see how things are done rather than to operate the cluster, s
 ## Repository layout
 
 ```text
-talos/            # topf topology (topf.yaml), image schematic, SOPS-encrypted secrets, per-node patches
+talos/            # Omni config patches (omni/), archived topf topology + SOPS secrets, image schematic
 argocd/           # ArgoCD bootstrap: its own install, the addon App-of-Apps, the tenant ApplicationSet
 addons/<name>/    # one directory per addon: helm/values.yaml, extra manifests, Grafana dashboards
 apps/<name>/      # one config.json per hosted application, consumed by charts/tenant
@@ -84,6 +85,7 @@ are closed as _not planned_, so the reasoning stays searchable. The longer write
     - [Network configuration](#network-configuration)
     - [Talos Linux installation](#talos-linux-installation)
     - [Network CNI](#network-cni)
+  - [Omni (cluster management)](#omni-cluster-management)
   - [Cluster Upgrades](#cluster-upgrades)
     - [Upgrading Talos Linux](#upgrading-talos-linux)
       - [How the installer image is resolved](#how-the-installer-image-is-resolved)
@@ -156,6 +158,12 @@ are closed as _not planned_, so the reasoning stays searchable. The longer write
 - Cilium BGP peering with Mikrotik router — see [Advanced Networking](#advanced-networking)
 
 ### Talos Linux installation
+
+> **Archived (topf era).** Since 2026-10-20 the cluster is managed by
+> [Omni](#omni-cluster-management); the `topf` workflow below (and `talos/topf.yaml`,
+> `talos/all/`, `talos/control-plane/`, `talos/secrets.yaml`) is kept as a record of how the cluster
+> was built and is not used day to day. `talos/schematic.yaml` is still the source for the installer
+> image's extensions. `topf apply` would conflict with Omni — don't run it. Tracked in #136.
 
 The installer image comes from the [Talos Image Factory](https://factory.talos.dev/), built from
 `talos/schematic.yaml`: bare-metal, `amd64`, SecureBoot, plus the `siderolabs/iscsi-tools` and
@@ -285,7 +293,46 @@ BGP peering with the router, the LoadBalancer IP pool, and the Hubble UI route a
 under `addons/cilium/` and arrive with the `cilium` `Application` — see
 [Advanced Networking](#advanced-networking).
 
+## Omni (cluster management)
+
+The cluster `k8s-nodes-ee` was imported into [Omni](https://omni.siderolabs.com/) SaaS (Hobby tier:
+free, up to 10 nodes) with `omnictl cluster import` and unlocked on 2026-10-20. Omni now owns the
+machine configs, Talos/Kubernetes upgrades and CA lifecycle; the local Talos API is no longer the way
+in, so use `omnictl` / the Omni UI (not `topf apply` or direct `talosctl apply-config`).
+
+- **Config patches** live in `talos/omni/` as `ConfigPatches` resources: cluster-scoped files
+  (`cluster-platform.yaml`, `cluster-node.yaml`, `cluster-etcd-metrics.yaml`) and per-machine
+  `machine-hostname-<node>.yaml`. They are the Omni equivalent of the old `talos/all/` and
+  `talos/control-plane/` patches. Change a patch in git, open a PR, then apply:
+
+  ```bash
+  omnictl apply -f talos/omni/ --dry-run   # review
+  omnictl apply -f talos/omni/
+  ```
+
+  Control planes can't be locked in Omni, so a patch change rolls across all 3 nodes one at a time —
+  watch `kubectl get nodes -w` and Cilium/etcd while it runs.
+
+- **Access**: `kubectl` keeps working through the VIP (`admin@k8s.nodes.ee`), which stays in the
+  API server certificate via `certExtraSANs` in `cluster-platform.yaml`; that is the break-glass path
+  when Omni or the internet is down. The Omni-proxied kubeconfig (OIDC) is an extra route.
+- **Rollback / import backup**: the pre-import machine configs are stored in 1Password (document),
+  never in this repo — they contain secrets.
+- **Not carried over**: topf's `UnattendedInstallConfig` (NVMe disk selector, install-time only) and
+  `SecurityProfileConfig` (Omni sets `workloadIsolation: true` itself). Recheck the install disk
+  selection on the first Omni-driven upgrade (#136).
+- The `kubelet.image` in `cluster-node.yaml` pins the Kubernetes version: bump it together with
+  the Kubernetes upgrade in Omni.
+
+Remaining migration work (CA rotation to clear `tainted-by-importing`, etcd backups, removing the
+archived topf files) is tracked in #136.
+
 ## Cluster Upgrades
+
+> **Archived instructions.** The sections below describe the topf-era upgrade flow. With Omni, upgrade
+> Talos and Kubernetes from the Omni UI (cluster → Upgrade) or `omnictl`, and check the
+> [kexec known issue](#known-issue-kexec-reboot-can-hang-a-node-during-upgrade-recheck-on-the-next-talos-upgrade)
+> before the first one. This section is rewritten as part of #136.
 
 Talos OS and Kubernetes each have their own version pinned in `talos/topf.yaml` (`talosVersion` and
 `kubernetesVersion`), and they upgrade **independently** — bumping one never triggers the other, and

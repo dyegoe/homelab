@@ -15,7 +15,13 @@ from [Renovate](https://docs.renovatebot.com/) (see `renovate.json`).
 
 ## Architecture
 
-- `talos/topf.yaml` — the single source of truth for cluster topology, consumed by
+- **Omni is the current Talos management plane** (cluster `k8s-nodes-ee`, imported and unlocked
+  2026-10-20; see README.md's `Omni (cluster management)`). Config patches live in `talos/omni/`
+  as `ConfigPatches` resources; review with `omnictl apply -f talos/omni/ --dry-run` (read-only),
+  and the user runs the real `omnictl apply`. Control planes can't be locked, so a patch change rolls
+  all 3 nodes. Never run `topf apply` — it conflicts with Omni. The topf material below is **archived
+  reference** until #136 removes it; keep `talos/omni/` in sync with any change to node config.
+- `talos/topf.yaml` (archived) — the former source of truth for cluster topology, consumed by
   [`topf`](https://github.com/postfinance/topf) to render and apply per-node Talos machine configs.
   Defines the cluster name/endpoint, Talos/Kubernetes versions, the image schematic reference
   (`talos/schematic.yaml`, hashed locally into `schematicId`), and the three physical nodes
@@ -42,6 +48,9 @@ from [Renovate](https://docs.renovatebot.com/) (see `renovate.json`).
   VLAN 86 (`172.31.86.0/24`), fronted by a Talos VIP at `172.31.86.10` for the Kubernetes API.
 
 ## Common commands
+
+> The topf commands in this section are archived (topf era). With Omni use `omnictl` (see
+> Architecture above and README.md's `Omni`); upgrades go through the Omni UI/`omnictl`.
 
 Run from the `talos/` directory. Per the mutating-actions rule below, `apply`/`upgrade` are for the
 user to run — Claude renders/dry-runs for review, never applies.

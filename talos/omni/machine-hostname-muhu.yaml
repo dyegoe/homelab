@@ -1,0 +1,16 @@
+# Per-machine Omni config patch: static hostname for muhu.
+metadata:
+  namespace: default
+  type: ConfigPatches.omni.sidero.dev
+  id: 200-hostname-29416912-2046-11e7-9c43-bc00009a0000
+  labels:
+    omni.sidero.dev/cluster: k8s-nodes-ee
+    omni.sidero.dev/cluster-machine: 29416912-2046-11e7-9c43-bc00009a0000
+  annotations:
+    name: Hostname muhu
+spec:
+  data: |
+    apiVersion: v1alpha1
+    kind: HostnameConfig
+    auto: "off"
+    hostname: muhu.nodes.ee
