@@ -118,6 +118,7 @@ are closed as _not planned_, so the reasoning stays searchable. The longer write
     - [Metrics dashboards](#metrics-dashboards)
     - [Known log noise (resolved in Kubernetes v1.37)](#known-log-noise-resolved-in-kubernetes-v137)
   - [Storage (Longhorn)](#storage-longhorn)
+    - [Backups (Cloudflare R2)](#backups-cloudflare-r2)
     - [Known issue: removed system snapshot never purged, volume uses ~2x its size (recheck on the next Longhorn upgrade or replica rebuild)](#known-issue-removed-system-snapshot-never-purged-volume-uses-2x-its-size-recheck-on-the-next-longhorn-upgrade-or-replica-rebuild)
   - [Bootstrap sequence summary](#bootstrap-sequence-summary)
   - [Development (pre-commit hooks)](#development-pre-commit-hooks)
@@ -1528,6 +1529,59 @@ with an explicit recheck trigger (bump `kubernetesVersion` in `talos/topf.yaml` 
 trigger fired with the upgrade to `v1.37.0` and the recheck confirmed the fix.
 
 ## Storage (Longhorn)
+
+### Backups (Cloudflare R2)
+
+Two replicas cover a node or disk loss, not the loss of the cluster. Backups go off-cluster to a
+Cloudflare R2 bucket (`longhorn-backup`, S3-compatible), tracked in
+[#129](https://github.com/dyegoe/homelab/issues/129). The bucket was created by hand in the
+Cloudflare dashboard, with an R2 API token scoped to **Object Read & Write on that bucket only**.
+
+**Why R2 and why opt-in.** R2 Standard storage is $0.015/GB-month with 10 GB-month, 1M Class A and
+10M Class B operations free and no egress fees ([pricing](https://developers.cloudflare.com/r2/pricing/),
+checked 2026-10-20; the free tier does not apply to Infrequent Access, so don't use that class). The
+small volumes fit in the free tier. Prometheus (~50 GB) and Loki (~9 GB) are re-creatable telemetry
+and would be nearly all the billable bytes (~$0.60-0.75/month), so they are **not** backed up.
+
+| Piece                                                                                                                                               | File                                                                                               |
+| --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Credentials (ExternalSecret from 1Password item `homelab-longhorn-r2-backup`, fields `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINTS`) | [`externalsecret-longhorn-r2-backup.yaml`](addons/longhorn/externalsecret-longhorn-r2-backup.yaml) |
+| Backup target `s3://longhorn-backup@auto/`                                                                                                          | `defaultBackupStore` in [`helm/values.yaml`](addons/longhorn/helm/values.yaml)                     |
+| Daily backup at 02:00 UTC, retain 7, group `backup`                                                                                                 | [`recurringjob-backup-daily.yaml`](addons/longhorn/recurringjob-backup-daily.yaml)                 |
+| `longhorn-backup` StorageClass (not default; puts its volumes in the `backup` group)                                                                | [`storageclass-longhorn-backup.yaml`](addons/longhorn/storageclass-longhorn-backup.yaml)           |
+| `LonghornBackupFailed` alert (Telegram)                                                                                                             | [`prometheusrule-longhorn-backup.yaml`](addons/longhorn/prometheusrule-longhorn-backup.yaml)       |
+
+The alert only fires for a backup that ran and failed. A backup that never starts creates no
+metric, so also check periodically:
+
+```bash
+kubectl -n longhorn-system get backuptargets.longhorn.io        # AVAILABLE should be true
+kubectl -n longhorn-system get backups.longhorn.io              # one per run, STATE Completed
+```
+
+**Opting a volume in.** New PVCs: set `storageClassName: longhorn-backup`. An existing volume's
+StorageClass can't change, so either label the Longhorn volume
+(`kubectl -n longhorn-system label volumes.longhorn.io <pvc-name> recurring-job-group.longhorn.io/backup=enabled`)
+or migrate by restore, below.
+
+**Migrating an existing volume by restore** (mutating, run it yourself; example: Grafana's PVC,
+`monitoring/grafana`). The old PV has `reclaimPolicy: Retain`, so nothing is deleted until you do it.
+
+1. Label the old volume into the `backup` group and take the first backup (UI: Volume → Create
+   Backup, or wait for 02:00 UTC). Wait for the backup to show `Completed` and
+   `kubectl -n longhorn-system get backups.longhorn.io`.
+2. Scale the workload to 0 so nothing writes between the backup and the cutover.
+3. In the Longhorn UI: Backup → the volume → Restore Latest Backup. Give it a new name, keep the
+   replica count at 2. This creates a new Longhorn volume holding the backed-up data.
+4. Create a PV/PVC for the restored volume (UI: Volume → Create PV/PVC), with the PVC in the
+   workload's namespace under the **same name** the workload expects, `storageClassName:
+longhorn-backup`. The old PVC must be deleted first (its PV stays, being `Retain`).
+5. Point the chart values at the new PVC if the name or class changed, scale the workload back up,
+   and verify the data.
+6. Once happy, delete the old PV and its Longhorn volume.
+
+The same steps without 5-6 are the **restore drill**: restore the latest backup of any opted-in
+volume into a throwaway volume, mount it with a scratch pod, check the data, delete both.
 
 ### Known issue: removed system snapshot never purged, volume uses ~2x its size (recheck on the next Longhorn upgrade or replica rebuild)
 

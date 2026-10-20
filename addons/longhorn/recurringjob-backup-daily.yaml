@@ -1,0 +1,18 @@
+---
+# Daily backup to the R2 backup target for volumes in the `backup` group, which opt in either via
+# the longhorn-backup StorageClass (storageclass-longhorn-backup.yaml) or by labelling an existing
+# Longhorn volume recurring-job-group.longhorn.io/backup=enabled. Deliberately not in the `default`
+# group: Prometheus and Loki are re-creatable telemetry and would be most of the stored bytes.
+# 02:00 UTC, an hour before snapshot-cleanup-nightly, so the two never overlap. Backups are
+# incremental, so retain 7 is about a week of restore points, not 7x the data.
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: backup-daily
+spec:
+  task: backup
+  cron: "0 2 * * *"
+  groups:
+    - backup
+  retain: 7
+  concurrency: 1

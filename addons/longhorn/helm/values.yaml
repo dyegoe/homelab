@@ -28,6 +28,13 @@ defaultSettings:
   storageMinimalAvailablePercentage: 10
   guaranteedInstanceManagerCPU: 12
   upgradeChecker: false
+# Cloudflare R2 bucket `longhorn-backup` (S3-compatible, free under 10 GB; see #129). The endpoint
+# and keys come from the longhorn-r2-backup Secret (externalsecret-longhorn-r2-backup.yaml); the
+# region in the URL is `auto` because R2 has none.
+defaultBackupStore:
+  backupTarget: s3://longhorn-backup@auto/
+  backupTargetCredentialSecret: longhorn-r2-backup
+  pollInterval: 300
 persistence:
   defaultClass: true
   defaultClassReplicaCount: 2
