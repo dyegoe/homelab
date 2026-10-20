@@ -233,10 +233,12 @@ grafana:
   # gets Grafana stuck on every redeploy. Recreate avoids it at the cost of a few seconds downtime.
   deploymentStrategy:
     type: Recreate
+  # Statically provisioned PVC bound to a Longhorn volume restored from the R2 backup (#129). Its
+  # StorageClass couldn't be changed in place, so the volume was migrated by restore (README:
+  # Storage > Backups). The volume carries recurring-job-group.longhorn.io/backup=enabled by label.
   persistence:
     enabled: true
-    storageClassName: longhorn
-    size: 5Gi
+    existingClaim: grafana-restored
   grafana.ini:
     server:
       root_url: https://grafana.nodes.ee
