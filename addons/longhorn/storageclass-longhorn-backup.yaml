@@ -1,0 +1,23 @@
+---
+# Same parameters as the chart-managed `longhorn` class (kubectl get sc longhorn -o yaml), plus a
+# recurringJobSelector that puts every volume provisioned from it into the `backup` group. Not the
+# default class: new PVCs opt in by naming it explicitly.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-backup
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "2"
+  staleReplicaTimeout: "30"
+  fromBackup: ""
+  fsType: ext4
+  dataLocality: disabled
+  unmapMarkSnapChainRemoved: ignored
+  disableRevisionCounter: "true"
+  dataEngine: v1
+  backupTargetName: default
+  recurringJobSelector: '[{"name":"backup","isGroup":true}]'
