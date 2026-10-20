@@ -1,0 +1,16 @@
+# Per-machine Omni config patch: static hostname for ruhnu.
+metadata:
+  namespace: default
+  type: ConfigPatches.omni.sidero.dev
+  id: 200-hostname-b3638000-f52f-11e7-8e6a-1cd2e2a62000
+  labels:
+    omni.sidero.dev/cluster: k8s-nodes-ee
+    omni.sidero.dev/cluster-machine: b3638000-f52f-11e7-8e6a-1cd2e2a62000
+  annotations:
+    name: Hostname ruhnu
+spec:
+  data: |
+    apiVersion: v1alpha1
+    kind: HostnameConfig
+    auto: "off"
+    hostname: ruhnu.nodes.ee
