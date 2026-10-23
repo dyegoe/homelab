@@ -2,6 +2,10 @@
 kubeProxyReplacement: true
 k8sServiceHost: 172.31.86.10
 k8sServicePort: 6443
+# Restart pods when their ConfigMap changes (checksum annotation on the pod template). Without this,
+# a cilium-config-only change syncs green in ArgoCD but the agents keep running the config they
+# read at startup — e.g. the envoy-xds-mode switch in #147 needed a manual `rollout restart`.
+rollOutCiliumPods: true
 routingMode: native
 ipv4NativeRoutingCIDR: 10.0.0.0/8
 autoDirectNodeRoutes: true
@@ -40,10 +44,12 @@ envoy:
   # rejected Envoy's LDS/CDS streams and the Gateway VIP lost its backend. Rendering the key makes
   # ArgoCD own it and keeps the agent and Envoy on the same mode.
   xdsMode: split
+  rollOutPods: true
   prometheus:
     serviceMonitor:
       enabled: true
 operator:
+  rollOutPods: true
   prometheus:
     serviceMonitor:
       enabled: true
