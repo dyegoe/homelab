@@ -34,6 +34,12 @@ prometheus:
     # present by the time this chart renders.
     trustCRDsExist: true
 envoy:
+  # Pinned explicitly: chart 1.20.4 dropped the implicit "ads" default, so Envoy's bootstrap
+  # switched to split xDS while cilium-config kept a stale `envoy-xds-mode: ads` (owned by the
+  # original manual `helm install`, so ArgoCD's server-side apply never removed it). The agent then
+  # rejected Envoy's LDS/CDS streams and the Gateway VIP lost its backend. Rendering the key makes
+  # ArgoCD own it and keeps the agent and Envoy on the same mode.
+  xdsMode: split
   prometheus:
     serviceMonitor:
       enabled: true
