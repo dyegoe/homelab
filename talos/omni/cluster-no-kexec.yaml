@@ -1,0 +1,19 @@
+# Cluster-scoped Omni config patch: disable kexec so every reboot (including Omni-driven Talos
+# upgrades) goes through firmware. muhu hung on kexec in two upgrades (#90), and Omni has no
+# powercycle reboot mode. Talos falls back to a normal reboot when kexec_file_load returns EPERM, and
+# sets the same sysctl itself on GCP. Sysctls apply live, no reboot needed; the value can't be
+# switched back to 0 until the next reboot.
+metadata:
+  namespace: default
+  type: ConfigPatches.omni.sidero.dev
+  id: 130-k8s-nodes-ee-no-kexec
+  labels:
+    omni.sidero.dev/cluster: k8s-nodes-ee
+  annotations:
+    name: Disable kexec reboots
+spec:
+  data: |
+    apiVersion: v1alpha1
+    kind: SysctlConfig
+    params:
+      kernel.kexec_load_disabled: "1"
