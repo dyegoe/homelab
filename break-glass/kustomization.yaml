@@ -1,0 +1,16 @@
+# Break-glass cluster-admin for when Omni (or the internet) is down: a ServiceAccount token that talks
+# straight to the VIP, independent of Omni's OIDC proxy. Applied by hand, NOT by ArgoCD: break-glass
+# must not depend on ArgoCD, and revoking it is `kubectl -n kube-system delete secret
+# break-glass-admin-token` (ArgoCD self-heal would recreate it with a fresh token).
+#
+#   kubectl apply -k break-glass/
+#   break-glass/kubeconfig.sh > <file>   # then store in 1Password and delete the file
+#
+# The token lives until the Secret is deleted. A Kubernetes CA rotation invalidates the kubeconfig's
+# embedded CA, so regenerate it after one.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - serviceaccount.yaml
+  - clusterrolebinding.yaml
+  - secret.yaml

@@ -140,8 +140,10 @@ template`/`lint`/`diff` work directly against it) and review signal (a values ch
 
 For **read-only** Kubernetes operations against this cluster (listing/inspecting resources,
 reading logs and events, etc.), prefer the `mcp__kubernetes__*` MCP tools over shelling out to
-`kubectl` via Bash. The default context (`admin@k8s.nodes.ee`) already points at this cluster's
-VIP (`172.31.86.10:6443`), so no extra kubeconfig setup is needed. Fall back to `talosctl`/`kubectl`
+`kubectl` via Bash. The default context is `nodes-k8s-nodes-ee` (Omni's OIDC proxy; pass
+`context: nodes-k8s-nodes-ee` to the MCP tools if their configured default differs). The old VIP
+admin context died with the 2026-10-26 CA rotation; the break-glass kubeconfig in 1Password (see
+README's `Omni` section, `break-glass/`) is for Omni outages only. Fall back to `talosctl`/`kubectl`
 in Bash for read-only things the MCP tools don't cover (e.g. `talosctl` service/log inspection at
 the Talos layer).
 
