@@ -301,7 +301,8 @@ machine configs, Talos/Kubernetes upgrades and CA lifecycle; the local Talos API
 in, so use `omnictl` / the Omni UI (not `topf apply` or direct `talosctl apply-config`).
 
 - **Config patches** live in `talos/omni/` as `ConfigPatches` resources: cluster-scoped files
-  (`cluster-platform.yaml`, `cluster-node.yaml`, `cluster-etcd-metrics.yaml`) and per-machine
+  (`cluster-platform.yaml`, `cluster-node.yaml`, `cluster-etcd-metrics.yaml`,
+  `cluster-no-kexec.yaml`) and per-machine
   `machine-hostname-<node>.yaml`. They are the Omni equivalent of the old `talos/all/` and
   `talos/control-plane/` patches. Change a patch in git, open a PR, then apply:
 
@@ -323,6 +324,9 @@ in, so use `omnictl` / the Omni UI (not `topf apply` or direct `talosctl apply-c
   selection on the first Omni-driven upgrade (#136).
 - The `kubelet.image` in `cluster-node.yaml` pins the Kubernetes version: bump it together with
   the Kubernetes upgrade in Omni.
+- **Talos upgrades** don't wait for Longhorn to be healthy between nodes, and a node can stay
+  cordoned afterwards. Gate each node by hand with `omnictl cluster lock k8s-nodes-ee` / `unlock`;
+  the steps are in [#155](https://github.com/dyegoe/homelab/issues/155).
 
 Remaining migration work (CA rotation to clear `tainted-by-importing`, etcd backups, removing the
 archived topf files) is tracked in #136.
@@ -427,24 +431,31 @@ of `UnattendedInstallConfig` the same day ([#91](https://github.com/dyegoe/homel
 
 #### Known issue: kexec reboot can hang a node during upgrade (recheck on the next Talos upgrade)
 
-By default `topf upgrade` (like `talosctl upgrade`) reboots into the new version via `kexec`, jumping
-straight from the old kernel to the new one without going through firmware. During the
-`v1.14.0` → `v1.14.2` upgrade on 2026-10-12, `kihnu` kexec'd fine (back and Ready within seconds),
-but `muhu` never came back: black screen, no ARP/ping, Talos API unreachable, for ~40 minutes until
-a hard power-button reset. It then booted `v1.14.2` cleanly, with no errors in `dmesg`, so the
-upgrade itself was fine and the hang happened in the reboot handoff. The hung boot's own logs were
-lost (Talos doesn't keep logs from previous boots), so kexec is the **suspected, not proven**
-cause. A hang right after kexec with a black screen is a known failure mode on some
-firmware/GPU/NIC combinations. The nodes aren't identical hardware: `kihnu` is an HP EliteDesk 800
-G2 DM 65W (BIOS 02.47), `muhu` the 35W model (BIOS 02.63), `ruhnu` a Lenovo `10MUS0J600`. `ruhnu`
-was then upgraded with `--reboot-mode powercycle` without issue.
+By default Talos reboots into a new version via `kexec`, jumping straight from the old kernel to the
+new one without going through firmware. During the `v1.14.0` → `v1.14.2` upgrade on 2026-10-12
+(`topf upgrade`), `kihnu` kexec'd fine (back and Ready within seconds), but `muhu` never came back:
+black screen, no ARP/ping, Talos API unreachable, for ~40 minutes until a hard power-button reset.
+It then booted `v1.14.2` cleanly, with no errors in `dmesg`, so the upgrade itself was fine and the
+hang happened in the reboot handoff. It happened again on 2026-10-26 in the first Omni-driven
+upgrade (`v1.14.4` → `v1.14.5`): `muhu` was upgraded first, dropped off the network, and booted
+`v1.14.5` after a power-cycle. The hung boots' own logs were lost (Talos doesn't keep logs from
+previous boots), so kexec is the **suspected, not proven** cause. A hang right after kexec with a
+black screen is a known failure mode on some firmware/GPU/NIC combinations. The nodes aren't
+identical hardware: `kihnu` is an HP EliteDesk 800 G2 DM 65W (BIOS 02.47), `muhu` the 35W model
+(BIOS 02.63), `ruhnu` a Lenovo `10MUS0J600`.
 
-Tracked in [#90](https://github.com/dyegoe/homelab/issues/90). Until there's evidence kexec is reliable on all three, upgrade with `--reboot-mode powercycle`
-(step 4 above). It adds a minute or two per node. **Recheck on the next Talos upgrade**: if you want
-to test kexec again, upgrade `muhu` alone (`--nodes-filter muhu`) with the default reboot mode, with
-someone at the console. If it hangs again, consider making it permanent with a
-`kernel.kexec_load_disabled: "1"` sysctl patch under `talos/all/`, which forces a full reboot for
-every reboot, not just upgrades.
+Omni has no equivalent of `--reboot-mode powercycle`, so kexec is now disabled for good with the
+`kernel.kexec_load_disabled: "1"` sysctl in `talos/omni/cluster-no-kexec.yaml`. Talos treats the
+resulting `EPERM` from `kexec_file_load` as "kexec support is disabled via sysctl" and does a normal
+firmware reboot instead
+([`kexec.go`](https://github.com/siderolabs/talos/blob/v1.14.5/internal/app/machined/pkg/runtime/v1alpha1/bootloader/kexec/kexec.go#L44-L69));
+Talos sets the same sysctl itself on GCP because VMs there get stuck on kexec
+([`gcp.go`](https://github.com/siderolabs/talos/blob/v1.14.5/internal/app/machined/pkg/runtime/v1alpha1/platform/gcp/gcp.go#L228-L230)).
+Every reboot takes a minute or two longer. The sysctl applies live, but Omni applies a pending
+upgrade **before** a pending config change on the same machine
+([docs](https://docs.siderolabs.com/omni/cluster-management/upgrading-clusters#how-omni-rolls-out-configuration-changes-and-upgrades)),
+so make sure the patch is applied on every node before starting an upgrade. Tracked in
+[#90](https://github.com/dyegoe/homelab/issues/90).
 
 ### Upgrading Kubernetes
 
