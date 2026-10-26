@@ -320,11 +320,16 @@ in, so use `omnictl` / the Omni UI (not `topf apply` or direct `talosctl apply-c
   (2026-10-26).
 - **Break-glass (Omni or internet down)**: a `cluster-admin` ServiceAccount token kubeconfig that
   talks straight to the VIP (kept in the API server certificate via `certExtraSANs` in
-  `cluster-platform.yaml`), stored in 1Password only. Create/refresh it with
-  `kubectl apply -k break-glass/` and `break-glass/kubeconfig.sh`; revoke it by deleting
-  the `kube-system/break-glass-admin-token` Secret. It is not ArgoCD-managed on purpose. Regenerate it
-  after a Kubernetes CA rotation. There is no Talos-level equivalent on SaaS: a talosconfig that
-  bypasses Omni (`omnictl talosconfig --break-glass`) needs Sidero support to enable it.
+  `cluster-platform.yaml`). Generating it needs a working context, so it has to exist **before** an
+  outage: it is merged into the workstation's `~/.kube/config` as context `k8s-nodes-ee-break-glass`
+  (usable fully offline), with a second copy in 1Password. Create/refresh it with
+  `kubectl apply -k break-glass/` and `break-glass/kubeconfig.sh`; revoke it by deleting the
+  `kube-system/break-glass-admin-token` Secret. It is not ArgoCD-managed on purpose. Regenerate it
+  after a Kubernetes CA rotation, and test it now and then (`kubectl --context
+k8s-nodes-ee-break-glass get nodes`). A ServiceAccount token was chosen over a client certificate
+  because it never expires and can be revoked; Kubernetes can't revoke a client cert short of a CA
+  rotation. There is no Talos-level equivalent on SaaS: a talosconfig that bypasses Omni
+  (`omnictl talosconfig --break-glass`) needs Sidero support to enable it.
 - **Rollback / import backup**: the pre-import machine configs are stored in 1Password (document),
   never in this repo — they contain secrets.
 - **Not carried over**: topf's `UnattendedInstallConfig` (NVMe disk selector, install-time only) and

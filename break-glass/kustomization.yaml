@@ -4,7 +4,7 @@
 # break-glass-admin-token` (ArgoCD self-heal would recreate it with a fresh token).
 #
 #   kubectl apply -k break-glass/
-#   break-glass/kubeconfig.sh > <file>   # then store in 1Password and delete the file
+#   break-glass/kubeconfig.sh > <file>   # merge into ~/.kube/config + a copy in 1Password
 #
 # The token lives until the Secret is deleted. A Kubernetes CA rotation invalidates the kubeconfig's
 # embedded CA, so regenerate it after one.

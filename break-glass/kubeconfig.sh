@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Prints a break-glass kubeconfig (token from break-glass/, server = the Talos VIP) to
-# stdout. Run it with a working context (e.g. the Omni one); it never writes to disk itself.
+# stdout. Run it once while Omni works (e.g. with the Omni context); the result must already be on
+# disk before an outage, since generating it needs a working context.
 #
-#   break-glass/kubeconfig.sh > /tmp/break-glass.kubeconfig   # store in 1Password, then delete
+#   break-glass/kubeconfig.sh > /tmp/break-glass.kubeconfig
 #   KUBECONFIG=/tmp/break-glass.kubeconfig kubectl get nodes  # test
+#   KUBECONFIG=~/.kube/config:/tmp/break-glass.kubeconfig kubectl config view --flatten \
+#     > /tmp/merged && mv /tmp/merged ~/.kube/config            # keep it locally (works offline)
+#   # second copy in 1Password (offline access enabled), then: rm /tmp/break-glass.kubeconfig
 set -euo pipefail
 
 server="https://172.31.86.10:6443"
