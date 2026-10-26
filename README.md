@@ -314,9 +314,22 @@ in, so use `omnictl` / the Omni UI (not `topf apply` or direct `talosctl apply-c
   Control planes can't be locked in Omni, so a patch change rolls across all 3 nodes one at a time —
   watch `kubectl get nodes -w` and Cilium/etcd while it runs.
 
-- **Access**: `kubectl` keeps working through the VIP (`admin@k8s.nodes.ee`), which stays in the
-  API server certificate via `certExtraSANs` in `cluster-platform.yaml`; that is the break-glass path
-  when Omni or the internet is down. The Omni-proxied kubeconfig (OIDC) is an extra route.
+- **Access**: day to day through Omni: `omnictl kubeconfig -c k8s-nodes-ee` (context
+  `nodes-k8s-nodes-ee`, OIDC via Omni's proxy) and `omnictl talosconfig -c k8s-nodes-ee`. Both need
+  Omni and the internet. The pre-import admin kubeconfig/talosconfig died with the CA rotation
+  (2026-10-26).
+- **Break-glass (Omni or internet down)**: a `cluster-admin` ServiceAccount token kubeconfig that
+  talks straight to the VIP (kept in the API server certificate via `certExtraSANs` in
+  `cluster-platform.yaml`). Generating it needs a working context, so it has to exist **before** an
+  outage: it is merged into the workstation's `~/.kube/config` as context `k8s-nodes-ee-break-glass`
+  (usable fully offline), with a second copy in 1Password. Create/refresh it with
+  `kubectl apply -k break-glass/` and `break-glass/kubeconfig.sh`; revoke it by deleting the
+  `kube-system/break-glass-admin-token` Secret. It is not ArgoCD-managed on purpose. Regenerate it
+  after a Kubernetes CA rotation, and test it now and then (`kubectl --context
+k8s-nodes-ee-break-glass get nodes`). A ServiceAccount token was chosen over a client certificate
+  because it never expires and can be revoked; Kubernetes can't revoke a client cert short of a CA
+  rotation. There is no Talos-level equivalent on SaaS: a talosconfig that bypasses Omni
+  (`omnictl talosconfig --break-glass`) needs Sidero support to enable it.
 - **Rollback / import backup**: the pre-import machine configs are stored in 1Password (document),
   never in this repo — they contain secrets.
 - **Not carried over**: topf's `UnattendedInstallConfig` (NVMe disk selector, install-time only) and
@@ -324,12 +337,21 @@ in, so use `omnictl` / the Omni UI (not `topf apply` or direct `talosctl apply-c
   selection on the first Omni-driven upgrade (#136).
 - The `kubelet.image` in `cluster-node.yaml` pins the Kubernetes version: bump it together with
   the Kubernetes upgrade in Omni.
-- **Talos upgrades** don't wait for Longhorn to be healthy between nodes, and a node can stay
-  cordoned afterwards. Gate each node by hand with `omnictl cluster lock k8s-nodes-ee` / `unlock`;
-  the steps are in [#155](https://github.com/dyegoe/homelab/issues/155).
+- **Talos upgrades**: Omni moves to the next node as soon as the previous one is Ready, but its drain
+  respects Longhorn's instance-manager PDBs with no timeout (`node-drain-policy:
+block-if-contains-last-replica`), so a node holding a volume's last healthy replica waits until the
+  rebuild finishes. "All volumes healthy" between nodes is not enforced; a node that hung and was
+  power-cycled may need `kubectl uncordon`. See [#155](https://github.com/dyegoe/homelab/issues/155).
+- **CA rotation** (`omnictl cluster -n k8s-nodes-ee secret rotate talos-ca` / `kubernetes-ca`, done
+  2026-10-26 to clear `tainted-by-importing`): no reboots. After the Kubernetes CA, approve the
+  pending `kubelet-serving` CSRs (`kubectl certificate approve …`) and restart
+  `kubelet-serving-cert-approver`, otherwise `logs`/`exec` fail; then find pods still logging
+  `x509: certificate signed by unknown authority` and delete them (ArgoCD, Argo Rollouts, Reloader)
+  or `rollout restart` CoreDNS. Most controllers (Cilium, Longhorn, Alloy, Prometheus, ESO, Kargo)
+  recovered on their own.
 
-Remaining migration work (CA rotation to clear `tainted-by-importing`, etcd backups, removing the
-archived topf files) is tracked in #136.
+Remaining migration work (etcd backups, Omni upgrade runbook, removing the archived topf files) is
+tracked in #136.
 
 ## Cluster Upgrades
 
