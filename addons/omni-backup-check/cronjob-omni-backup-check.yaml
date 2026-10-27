@@ -1,0 +1,79 @@
+---
+# Fails when the newest object in the `omni-etcd-backup` bucket is older than MAX_AGE_HOURS (24h
+# interval + Omni's ±5m jitter + slack), or when the bucket can't be listed at all. A failed Job
+# raises KubeJobFailed after 15m. ttlSecondsAfterFinished (5h) outlives the 4h schedule, so the
+# alert stays firing while every run fails and resolves within 5h of the first good run.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: omni-backup-check
+spec:
+  schedule: "17 */4 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2 # ride out a transient network blip before failing the Job
+      activeDeadlineSeconds: 300
+      ttlSecondsAfterFinished: 18000
+      template:
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: check
+              # aws CLI + jq + a shell; same image as talos/healthchecks/longhorn-volumes.yaml.
+              image: docker.io/alpine/k8s:1.37.1
+              env:
+                - name: BUCKET
+                  value: omni-etcd-backup
+                - name: MAX_AGE_HOURS
+                  value: "26"
+                - name: HOME # aws CLI cache
+                  value: /tmp
+              envFrom:
+                - secretRef:
+                    name: r2-omni-etcd-backup-ro
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu -o pipefail
+                  newest=$(aws s3api list-objects-v2 --bucket "$BUCKET" \
+                      --endpoint-url "$AWS_ENDPOINTS" --region auto --output json \
+                    | jq -r '[.Contents[]?.LastModified | sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z")
+                             | fromdateiso8601] | max // empty')
+                  if [ -z "$newest" ]; then
+                    echo "no Omni etcd backup found in bucket $BUCKET" >&2
+                    exit 1
+                  fi
+                  age_h=$(( ($(date +%s) - newest) / 3600 ))
+                  if [ "$age_h" -ge "$MAX_AGE_HOURS" ]; then
+                    echo "newest Omni etcd backup in $BUCKET is ${age_h}h old (limit ${MAX_AGE_HOURS}h); check: omnictl get etcdbackupoverallstatus" >&2
+                    exit 1
+                  fi
+                  echo "newest Omni etcd backup in $BUCKET is ${age_h}h old"
+          volumes:
+            - name: tmp
+              emptyDir: {}
