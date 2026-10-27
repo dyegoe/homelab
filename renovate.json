@@ -24,6 +24,50 @@
       ],
       "depNameTemplate": "argoproj/argo-cd",
       "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "Talos version in the Omni cluster template",
+      "managerFilePatterns": [
+        "/^talos/cluster\\.yaml$/"
+      ],
+      "matchStrings": [
+        "\\ntalos:\\n  version: (?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "siderolabs/talos",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "Kubernetes version in the Omni cluster template; tracks Sidero's kubelet image so it moves with the pin in talos/patches/node.yaml",
+      "managerFilePatterns": [
+        "/^talos/cluster\\.yaml$/"
+      ],
+      "matchStrings": [
+        "\\nkubernetes:\\n  version: (?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "ghcr.io/siderolabs/kubelet",
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Container images referenced from Talos patches and Omni healthchecks",
+      "managerFilePatterns": [
+        "/^talos/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "image: (?<depName>[^\\s:]+):(?<currentValue>[^\\s@]+)"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Kubernetes version and kubelet image are one upgrade: one PR, applied with omnictl cluster template sync",
+      "matchDepNames": [
+        "ghcr.io/siderolabs/kubelet"
+      ],
+      "groupName": "kubernetes (Omni)"
     }
   ]
 }

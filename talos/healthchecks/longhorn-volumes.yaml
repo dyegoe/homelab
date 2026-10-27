@@ -1,0 +1,52 @@
+# Omni upgrade healthcheck (#155): holds a Talos upgrade before each next node while any Longhorn
+# volume is degraded/faulted or mid attach/detach, i.e. until the previous node's replicas have
+# rebuilt. Detached volumes report robustness "unknown" and are skipped. Omni sets the Job's name and
+# labels, deletes it on success and re-creates it on failure; stderr becomes the reason shown in
+# `omnictl get talosupgradestatus k8s-nodes-ee`. RBAC: talos/manifests/longhorn-healthcheck-rbac.yaml.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  namespace: longhorn-system
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 120
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: omni-longhorn-healthcheck
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: check
+          # Needs a shell + kubectl; registry.k8s.io/kubectl is shell-less.
+          image: docker.io/alpine/k8s:1.37.1
+          env:
+            - name: HOME # kubectl's discovery cache
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          command:
+            - sh
+            - -c
+            - |
+              set -eu -o pipefail
+              vols=$(kubectl -n longhorn-system get volumes.longhorn.io \
+                -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.state}{" "}{.status.robustness}{"\n"}{end}')
+              bad=$(printf '%s\n' "$vols" | awk 'NF && ($3 == "degraded" || $3 == "faulted" || ($2 != "attached" && $2 != "detached"))')
+              if [ -n "$bad" ]; then
+                echo "longhorn volumes not healthy (name state robustness): $(echo "$bad" | tr '\n' ';')" >&2
+                exit 1
+              fi
+              echo "all $(printf '%s\n' "$vols" | grep -c .) longhorn volumes healthy or detached"

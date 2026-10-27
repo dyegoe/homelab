@@ -1,0 +1,93 @@
+# Omni cluster template: the source of truth for k8s-nodes-ee (versions, extensions, machines, config
+# patches, upgrade healthchecks). File paths below resolve against this file's directory:
+#   omnictl cluster template validate -f talos/cluster.yaml
+#   omnictl cluster template diff -f talos/cluster.yaml   # review against the live cluster
+#   omnictl cluster template sync -f talos/cluster.yaml   # user runs this
+# Changing talos.version or kubernetes.version here is the upgrade; see README's Cluster Upgrades.
+# Renovate bumps both versions (and the kubelet image in patches/node.yaml) via renovate.json.
+kind: Cluster
+name: k8s-nodes-ee
+kubernetes:
+  version: v1.37.1
+  manifests:
+    - name: longhorn-healthcheck-rbac
+      mode: full
+      file: manifests/longhorn-healthcheck-rbac.yaml
+  # Gate each node of a Talos upgrade on Longhorn having rebuilt the previous node's replicas (#155).
+  # Talos upgrades only: Kubernetes upgrades and config changes are not gated.
+  healthchecks:
+    - name: longhorn-volumes
+      interval: 30s
+      file: healthchecks/longhorn-volumes.yaml
+talos:
+  version: v1.14.5
+features:
+  disablePublicDiscoveryService: false
+# Longhorn needs both. Same list as the image the nodes were installed from, so the schematic ID
+# (613e1592…) is unchanged; adding/removing one triggers a rolling upgrade.
+systemExtensions:
+  - siderolabs/iscsi-tools
+  - siderolabs/util-linux-tools
+# idOverride keeps the ConfigPatch IDs created before the template existed, so syncing updates them
+# in place instead of delete + create.
+patches:
+  - idOverride: 100-k8s-nodes-ee-platform
+    annotations:
+      name: Platform (CNI, kube-proxy, scheduling, control-plane components)
+    file: patches/platform.yaml
+  - idOverride: 110-k8s-nodes-ee-node
+    annotations:
+      name: Node (kubelet, VIP, logging)
+    file: patches/node.yaml
+  - idOverride: 120-k8s-nodes-ee-etcd-metrics
+    annotations:
+      name: etcd metrics listener
+    file: patches/etcd-metrics.yaml
+  - idOverride: 130-k8s-nodes-ee-no-kexec
+    annotations:
+      name: Disable kexec reboots
+    file: patches/no-kexec.yaml
+---
+kind: ControlPlane
+machines:
+  - dba2c3ee-e7d5-11e5-8308-85301e0d40df # kihnu
+  - 29416912-2046-11e7-9c43-bc00009a0000 # muhu
+  - b3638000-f52f-11e7-8e6a-1cd2e2a62000 # ruhnu
+---
+kind: Workers
+---
+kind: Machine
+name: dba2c3ee-e7d5-11e5-8308-85301e0d40df
+patches:
+  - idOverride: 200-hostname-dba2c3ee-e7d5-11e5-8308-85301e0d40df
+    annotations:
+      name: Hostname kihnu
+    inline:
+      apiVersion: v1alpha1
+      kind: HostnameConfig
+      auto: "off"
+      hostname: kihnu.nodes.ee
+---
+kind: Machine
+name: 29416912-2046-11e7-9c43-bc00009a0000
+patches:
+  - idOverride: 200-hostname-29416912-2046-11e7-9c43-bc00009a0000
+    annotations:
+      name: Hostname muhu
+    inline:
+      apiVersion: v1alpha1
+      kind: HostnameConfig
+      auto: "off"
+      hostname: muhu.nodes.ee
+---
+kind: Machine
+name: b3638000-f52f-11e7-8e6a-1cd2e2a62000
+patches:
+  - idOverride: 200-hostname-b3638000-f52f-11e7-8e6a-1cd2e2a62000
+    annotations:
+      name: Hostname ruhnu
+    inline:
+      apiVersion: v1alpha1
+      kind: HostnameConfig
+      auto: "off"
+      hostname: ruhnu.nodes.ee
