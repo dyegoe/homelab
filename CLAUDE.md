@@ -15,82 +15,49 @@ from [Renovate](https://docs.renovatebot.com/) (see `renovate.json`).
 
 ## Architecture
 
-- **Omni is the current Talos management plane** (cluster `k8s-nodes-ee`, imported and unlocked
-  2026-10-20; see README.md's `Omni (cluster management)`). Config patches live in `talos/omni/`
-  as `ConfigPatches` resources; review with `omnictl apply -f talos/omni/ --dry-run` (read-only),
-  and the user runs the real `omnictl apply`. Control planes can't be locked, so a patch change rolls
-  all 3 nodes. Never run `topf apply` — it conflicts with Omni. The topf material below is **archived
-  reference** until #136 removes it; keep `talos/omni/` in sync with any change to node config.
-- `talos/topf.yaml` (archived) — the former source of truth for cluster topology, consumed by
-  [`topf`](https://github.com/postfinance/topf) to render and apply per-node Talos machine configs.
-  Defines the cluster name/endpoint, Talos/Kubernetes versions, the image schematic reference
-  (`talos/schematic.yaml`, hashed locally into `schematicId`), and the three physical nodes
-  (`host`/`ip`/`role: control-plane`).
-- `talos/secrets.yaml` — SOPS-encrypted Talos secrets bundle (cluster CA/tokens/keys). Never
-  regenerate this for an existing cluster — it holds the cluster's actual cryptographic identity;
-  losing/replacing it breaks trust for every existing node, Secret, and credential.
-- `talos/all/`, `talos/control-plane/` — topf patch directories, one file per document, applied in
-  filename order (`01-`, `02-`, … prefixes control ordering). `all/` applies to every node,
-  `control-plane/` to control-plane-role nodes only (this cluster has no `worker/` — all 3 nodes are
-  control-plane). A `.tpl` suffix enables Go templating (`{{ .Node.Host }}`, `{{ .KubernetesVersion }}`,
-  etc.) — see `topf`'s own `configuration-model.md` docs for the full template context.
-  `$patch: delete` on a document (or a specific map key, e.g. one taint) removes something `topf`
-  auto-generates by default — used here for `KubeletConfig` (keeping legacy `machine.kubelet`, since
-  the typed doc has no equivalent for `extraMounts`, needed for Longhorn's bind mount). A patch
-  document with the same `kind` and no `$patch` merges into the generated one instead — e.g.
-  `all/01-unattended-install.yaml` only overrides the install-disk selector of topf's generated
-  `UnattendedInstallConfig`, whose installer image topf derives from `talosVersion` + schematic.
-- There is no generated-output directory to gitignore — `topf render -o <dir>` writes to whatever
-  directory you point it at (for local inspection only, never commit it), and `topf apply` talks to
-  the live nodes directly without an intermediate generated-file step.
-- The cluster is a 3-node, all-control-plane topology (no legacy `allowSchedulingOnMasters` field —
-  handled via `all/02-scheduling.yaml` deleting the default control-plane `NoSchedule` taint) on
-  VLAN 86 (`172.31.86.0/24`), fronted by a Talos VIP at `172.31.86.10` for the Kubernetes API.
+- **Omni manages Talos** (SaaS, cluster `k8s-nodes-ee`, imported 2026-10-20; see README.md's
+  `Omni (cluster management)`). `talos/cluster.yaml` is an Omni **cluster template** and the
+  source of truth: Talos/Kubernetes versions, system extensions, the three machines, config patches
+  and upgrade healthchecks. It references `talos/patches/` (raw Talos strategic-merge patches;
+  multi-document files are fine, and `idOverride` keeps the ConfigPatch IDs stable),
+  `talos/healthchecks/` (Jobs that gate each node of a Talos upgrade) and `talos/manifests/`
+  (Kubernetes objects Omni syncs for those Jobs). File paths resolve against `talos/`.
+- Don't edit the cluster in the Omni UI or with `omnictl apply`: `sync` creates, updates and deletes
+  what the template owns, so out-of-band changes get overwritten.
+- The topf era (`talos/topf.yaml`, `talos/all/`, `talos/control-plane/`, SOPS `talos/secrets.yaml`)
+  was removed; it lives at commit `473d3cf`. Never run `topf apply` against this cluster. That
+  commit's `secrets.yaml` still holds the etcd secretbox key in use: never regenerate it.
+- `$patch: delete` on a document (or a map key, e.g. the `taints` list) removes something Talos
+  generates by default: used for `KubeletConfig` (legacy `machine.kubelet` stays, since the typed
+  doc has no equivalent for `extraMounts`, needed for Longhorn's bind mount; that's also why
+  `talos/patches/node.yaml` pins the kubelet image, which must match `kubernetes.version`),
+  `KubeFlannelCNIConfig` (Cilium is the CNI) and the control-plane `NoSchedule` taint.
+- The cluster is a 3-node, all-control-plane topology on VLAN 86 (`172.31.86.0/24`), fronted by a
+  Talos VIP at `172.31.86.10` for the Kubernetes API.
 
 ## Common commands
 
-> The topf commands in this section are archived (topf era). With Omni use `omnictl` (see
-> Architecture above and README.md's `Omni`); upgrades go through the Omni UI/`omnictl`.
-
-Run from the `talos/` directory. Per the mutating-actions rule below, `apply`/`upgrade` are for the
-user to run — Claude renders/dry-runs for review, never applies.
+`omnictl` reads `~/.talos/omni/config`; the first call after the auth key expires opens a browser to
+re-authenticate. Per the mutating-actions rule below, `sync` is for the user to run: Claude
+validates and diffs.
 
 ```bash
-# Render machine configs locally for inspection (no cluster contact) — the day-to-day way to review
-# a patch change before applying it
-topf render -o /tmp/topf-check --redact=false
-
-# Preview what a real apply would change against the live cluster (read-only, never mutates)
-topf apply --dry-run --nodes-filter '<hostname>' --confirm=false
-
-# Apply a reviewed change to the live cluster (mutating — user runs this)
-topf apply --nodes-filter '<hostname>'
+omnictl cluster template validate -f talos/cluster.yaml   # offline schema check
+omnictl cluster template diff -f talos/cluster.yaml       # read-only diff against live Omni state
+omnictl cluster template sync -f talos/cluster.yaml       # mutating: user runs this
+omnictl cluster template export -c k8s-nodes-ee           # read-only: live state as a template
+omnictl get talosupgradestatus k8s-nodes-ee -o yaml       # upgrade progress / healthcheck holds
 ```
 
-**Changing a config**: edit the relevant file under `all/`/`control-plane/` (or `topf.yaml` itself),
-`render` to inspect the generated output, `apply --dry-run` against the live cluster to confirm the
-diff is exactly what you expect, then `apply` for real. One node at a time for anything riskier than
-a label/log-destination tweak — this cluster's own migration surfaced real footguns (a taint that
-would have made every node unschedulable, a kubelet-config conflict) that only showed up in the
-`apply --dry-run` diff, not in a local `render`.
+**Changing a config**: edit `talos/cluster.yaml` or a file it references, `validate`, then `diff`
+and check it shows exactly the intended change before handing over `sync`. Control planes can't be
+locked, so a patch change rolls across all 3 nodes one at a time. Never put a change to
+`talos/patches/no-kexec.yaml` in the same sync as a Talos upgrade (Omni applies the upgrade first).
 
-Applying config to a freshly-booted (insecure/maintenance-mode) node — `topf` detects maintenance
-mode automatically, no `--insecure` flag needed:
-
-```bash
-topf apply --auto-bootstrap
-```
-
-Use `topf talosconfig > talosconfig` (then `export TALOSCONFIG=$(pwd)/talosconfig`, or copy to
-`~/.talos/config`) for subsequent authenticated `talosctl` operations. `topf kubeconfig` generates a
-12-hour admin kubeconfig — fine for ad-hoc access, but not a substitute for whatever
-longer-lived/GitOps-managed kubeconfig normally drives `kubectl`.
-
-**Upgrading Talos or Kubernetes**: full runbook lives in README.md's `Cluster Upgrades` section —
-that's the canonical reference. Summary: `talosVersion` and `kubernetesVersion` in `talos/topf.yaml`
-upgrade independently (Talos via `topf upgrade`, Kubernetes via `talosctl upgrade-k8s --to
-<version>`), neither is Renovate-managed, and both are mutating — same rule as `apply`/`upgrade`
-above, Claude renders/dry-runs, the user runs the real command.
+**Upgrading Talos or Kubernetes**: full runbook in README.md's `Cluster Upgrades` section. Summary:
+`talos.version` / `kubernetes.version` in `talos/cluster.yaml` upgrade independently; Renovate opens
+the bump PRs (Kubernetes grouped with the kubelet pin), and the upgrade happens on `sync`, not on
+merge. Check the Talos support matrix before a Kubernetes bump.
 
 ## GitOps architecture
 
@@ -175,9 +142,9 @@ runs a command (checking pod/node status, logs, etc.) is always fine and encoura
 - Pushing changes: `main` is protected (1 approval + the `check-pull-request` check), so always
   create a branch, push it, and open a PR; never push to `main` directly.
 - Node hardware/network details (hostnames, static IPs, disk device names) are documented in
-  README.md — keep `topf.yaml` and README.md in sync when nodes change.
-- `installDisk` per node is `/dev/nvme0n1`; verify this matches actual hardware before applying to
-  a new/replaced node.
+  README.md — keep `talos/cluster.yaml` and README.md in sync when nodes change.
+- A new or replaced node's `Machine` document gets `install.disk: /dev/nvme0n1`; verify this
+  matches the actual hardware before the sync.
 - `origin` is `git@github.com:dyegoe/homelab.git`, branch `main`. ArgoCD's repo-access secret uses
   the HTTPS form of the same URL (`https://github.com/dyegoe/homelab.git`) — keep that in mind if
   the remote or credential type ever changes, since ArgoCD matches credentials by URL.

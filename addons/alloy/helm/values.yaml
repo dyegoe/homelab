@@ -4,8 +4,7 @@ alloy:
   # experimental in Alloy - bump the whole minimum stability level to unlock it.
   stabilityLevel: "experimental"
   # Extra listener for Talos's `machine.logging.destinations` json_lines stream (see
-  # talos/control-plane/01-base.yaml.tpl - the endpoint has to be added to the machine.logging
-  # patch there).
+  # talos/patches/node.yaml, which points machine.logging and KmsgLogConfig at this listener).
   extraPorts:
     - name: talos-logs
       port: 5140

@@ -1,0 +1,43 @@
+# Cluster-wide Talos config patch: kubelet, VIP and log shipping. Referenced from
+# talos/cluster.yaml (ConfigPatch 110-k8s-nodes-ee-node).
+---
+# Legacy machine.kubelet stays: KubeletConfig has no equivalent for extraMounts (Longhorn's
+# /var/mnt/longhorn bind mount), so the typed document is deleted below.
+apiVersion: v1alpha1
+kind: KubeletConfig
+$patch: delete
+---
+machine:
+  kubelet:
+    # Must match kubernetes.version in talos/cluster.yaml (Renovate bumps both in one PR).
+    image: ghcr.io/siderolabs/kubelet:v1.37.1
+    defaultRuntimeSeccompProfileEnabled: true
+    disableManifestsDirectory: true
+    extraArgs:
+      rotate-server-certificates: "true"
+    extraMounts:
+      - destination: /var/mnt/longhorn
+        type: bind
+        source: /var/mnt/longhorn
+        options:
+          - bind
+          - rshared
+          - rw
+  network:
+    interfaces:
+      - deviceSelector:
+          physical: true
+        dhcp: true
+        vip:
+          ip: 172.31.86.10
+  logging:
+    destinations:
+      # Alloy's alloy-talos-logs LoadBalancer Service
+      - endpoint: tcp://172.31.100.2:5140/
+        format: json_lines
+---
+# Kernel/dmesg logs to the same Alloy Service.
+apiVersion: v1alpha1
+kind: KmsgLogConfig
+name: talos-kernel-logs
+url: tcp://172.31.100.2:5140/

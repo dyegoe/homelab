@@ -1,4 +1,0 @@
----
-apiVersion: v1alpha1
-kind: KubeFlannelCNIConfig
-$patch: delete # Bypassing default CNI for Cilium

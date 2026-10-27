@@ -10,7 +10,12 @@ repos:
       - id: mixed-line-ending
       - id: check-case-conflict
       - id: check-yaml
-        exclude: ^charts/.+/templates/.*\.ya?ml$
+        exclude: ^(charts/.+/templates/.*\.ya?ml|talos/.*)$
+      # The Omni cluster template and Talos patches are multi-document by design.
+      - id: check-yaml
+        name: check yaml (multi-document, talos/)
+        args: [--allow-multiple-documents]
+        files: ^talos/.*\.ya?ml$
 
   # Helm chart templates (charts/*/templates/*.yaml) are Go-template source, not plain YAML -
   # they're rendered to text before ever being parsed as YAML, so unquoted {{ }} is expected to

@@ -5,11 +5,9 @@ crds:
   enabled: false
 # Talos runs kube-controller-manager/kube-scheduler as regular kube-system static pods with the
 # standard upstream labels, so the chart's default Service+ServiceMonitor for them finds the
-# right pods. BUT: as of writing, both still bind their metrics port to 127.0.0.1 (Talos's
-# default), so the Service can reach nothing and these targets will show as down until a
-# KubeControllerManagerConfig/KubeSchedulerConfig `extraArgs: bind-address: 0.0.0.0` patch is
-# added to talos/control-plane/ (see 04-kube-controller-manager.yaml, 05-kube-scheduler.yaml) and
-# applied. Left enabled since a down target is harmless.
+# right pods. Both bind their metrics port to 127.0.0.1 by default (Talos), so the targets are only
+# reachable thanks to the KubeControllerManagerConfig/KubeSchedulerConfig `bind-address: 0.0.0.0`
+# extraArgs in talos/patches/platform.yaml.
 # etcd is a native Talos host service, not a Kubernetes pod, so there is nothing for the chart's
 # default `component: etcd` selector to match. The chart's alternative (`kubeEtcd.endpoints`, a
 # selector-less Service plus a v1 Endpoints object) doesn't work here: ArgoCD's default
@@ -71,8 +69,8 @@ prometheus:
     probeSelectorNilUsesHelmValues: false
     ruleSelectorNilUsesHelmValues: false
     # etcd's plain-HTTP metrics listener on each node, opened by
-    # talos/control-plane/08-etcd-metrics.yaml (see the kubeEtcd comment above for why this is a
-    # static job). Keep the targets in sync with talos/topf.yaml when nodes change.
+    # talos/patches/etcd-metrics.yaml (see the kubeEtcd comment above for why this is a
+    # static job). Keep the targets in sync with the machines in talos/cluster.yaml.
     additionalScrapeConfigs:
       - job_name: kube-etcd
         static_configs:

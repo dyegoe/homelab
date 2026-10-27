@@ -3,9 +3,9 @@
 A three-node bare-metal Kubernetes cluster on [Talos Linux](https://www.talos.dev/), managed end to
 end from this repository: the Talos machine configs, every cluster addon, and multi-environment
 promotion for the applications it hosts. After the one-time bootstrap, a cluster change is a git
-commit — Talos machine-config changes are the main thing still pushed from a workstation
-(`omnictl apply`, since the cluster joined [Omni](#omni-cluster-management)), and those come from
-files in this repo too.
+commit — Talos machine-config changes and upgrades are the main thing still pushed from a
+workstation (`omnictl cluster template sync`, since the cluster joined
+[Omni](#omni-cluster-management)), and those come from a template in this repo too.
 
 I run it to learn, and to have somewhere real to break things. It hosts my personal website and a
 couple of side projects, and this README doubles as the runbook I actually operate from, so it is
@@ -14,19 +14,19 @@ written down next to the thing they apply to.
 
 ## Stack at a glance
 
-| Layer         | What                                                                                             | Notes                                                                                                                                                 |
-| ------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OS            | Talos Linux, SecureBoot, all three nodes control-plane                                           | Managed by [Omni](#omni-cluster-management) (SaaS, Hobby tier); config patches live in `talos/omni/`. `topf` files in `talos/` are archived reference |
-| Networking    | Cilium (kube-proxy replacement, native routing), Gateway API, BGP peering with a Mikrotik router | LoadBalancer IPs are advertised over BGP, not L2                                                                                                      |
-| GitOps        | ArgoCD (self-managed), App-of-Apps for addons, ApplicationSet + `charts/tenant` for hosted apps  | [Renovate](https://docs.renovatebot.com/) opens the version-bump PRs                                                                                  |
-| Delivery      | Kargo + Argo Rollouts                                                                            | Warehouse → `dev` (automatic) → `prd` (manual approval), provisioned per app from one `config.json`                                                   |
-| Secrets       | External Secrets Operator backed by 1Password; Sealed Secrets for the single bootstrap token     | Reloader restarts consumers on rotation                                                                                                               |
-| Edge          | cert-manager (Let's Encrypt, Cloudflare DNS-01), external-dns, Cloudflare Tunnel                 | Internal services share one wildcard cert, terminated at the Gateway                                                                                  |
-| Storage       | Longhorn, CloudNativePG                                                                          |                                                                                                                                                       |
-| Observability | kube-prometheus-stack, Loki, Alloy (pod logs + Talos host logs), Alertmanager → Telegram         | Addons with a live Prometheus target ship their own Grafana dashboard as a `ConfigMap`                                                                |
+| Layer         | What                                                                                             | Notes                                                                                                        |
+| ------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| OS            | Talos Linux, SecureBoot, all three nodes control-plane                                           | Managed by [Omni](#omni-cluster-management) (SaaS, Hobby tier) from a cluster template, `talos/cluster.yaml` |
+| Networking    | Cilium (kube-proxy replacement, native routing), Gateway API, BGP peering with a Mikrotik router | LoadBalancer IPs are advertised over BGP, not L2                                                             |
+| GitOps        | ArgoCD (self-managed), App-of-Apps for addons, ApplicationSet + `charts/tenant` for hosted apps  | [Renovate](https://docs.renovatebot.com/) opens the version-bump PRs                                         |
+| Delivery      | Kargo + Argo Rollouts                                                                            | Warehouse → `dev` (automatic) → `prd` (manual approval), provisioned per app from one `config.json`          |
+| Secrets       | External Secrets Operator backed by 1Password; Sealed Secrets for the single bootstrap token     | Reloader restarts consumers on rotation                                                                      |
+| Edge          | cert-manager (Let's Encrypt, Cloudflare DNS-01), external-dns, Cloudflare Tunnel                 | Internal services share one wildcard cert, terminated at the Gateway                                         |
+| Storage       | Longhorn, CloudNativePG                                                                          |                                                                                                              |
+| Observability | kube-prometheus-stack, Loki, Alloy (pod logs + Talos host logs), Alertmanager → Telegram         | Addons with a live Prometheus target ship their own Grafana dashboard as a `ConfigMap`                       |
 
-Versions are pinned where ArgoCD and `topf` read them (`argocd/addons/*.yaml`,
-`argocd/install/kustomization.yaml`, `talos/topf.yaml`), not repeated here — Renovate keeps those
+Versions are pinned where ArgoCD and Omni read them (`argocd/addons/*.yaml`,
+`argocd/install/kustomization.yaml`, `talos/cluster.yaml`), not repeated here — Renovate keeps those
 moving, and a version table in a README only rots.
 
 ## Worth reading
@@ -53,7 +53,7 @@ If you are here to see how things are done rather than to operate the cluster, s
 ## Repository layout
 
 ```text
-talos/            # Omni config patches (omni/), archived topf topology + SOPS secrets, image schematic
+talos/            # Omni cluster template (cluster.yaml), Talos config patches, upgrade healthchecks
 argocd/           # ArgoCD bootstrap: its own install, the addon App-of-Apps, the tenant ApplicationSet
 addons/<name>/    # one directory per addon: helm/values.yaml, extra manifests, Grafana dashboards
 apps/<name>/      # one config.json per hosted application, consumed by charts/tenant
@@ -88,8 +88,7 @@ are closed as _not planned_, so the reasoning stays searchable. The longer write
   - [Omni (cluster management)](#omni-cluster-management)
   - [Cluster Upgrades](#cluster-upgrades)
     - [Upgrading Talos Linux](#upgrading-talos-linux)
-      - [How the installer image is resolved](#how-the-installer-image-is-resolved)
-      - [Known issue: kexec reboot can hang a node during upgrade (recheck on the next Talos upgrade)](#known-issue-kexec-reboot-can-hang-a-node-during-upgrade-recheck-on-the-next-talos-upgrade)
+      - [Known issue (resolved): kexec reboot hung a node during upgrades](#known-issue-resolved-kexec-reboot-hung-a-node-during-upgrades)
     - [Upgrading Kubernetes](#upgrading-kubernetes)
   - [GitOps](#gitops)
     - [Architecture](#architecture)
@@ -159,104 +158,47 @@ are closed as _not planned_, so the reasoning stays searchable. The longer write
 
 ### Talos Linux installation
 
-> **Archived (topf era).** Since 2026-10-20 the cluster is managed by
-> [Omni](#omni-cluster-management); the `topf` workflow below (and `talos/topf.yaml`,
-> `talos/all/`, `talos/control-plane/`, `talos/secrets.yaml`) is kept as a record of how the cluster
-> was built and is not used day to day. `talos/schematic.yaml` is still the source for the installer
-> image's extensions. `topf apply` would conflict with Omni — don't run it. Tracked in #136.
+> **Archived: the topf era.** The cluster was built with [`topf`](https://github.com/postfinance/topf)
+> (`talos/topf.yaml`, per-role patch directories, a SOPS-encrypted secrets bundle) and imported into
+> Omni on 2026-10-20. Those files were removed once the [Omni cluster template](#omni-cluster-management)
+> took over. Commit [`473d3cf`](https://github.com/dyegoe/homelab/tree/473d3cf) is the last one with
+> them: [`talos/`](https://github.com/dyegoe/homelab/tree/473d3cf/talos) and the runbook as it was
+> ([installation](https://github.com/dyegoe/homelab/blob/473d3cf/README.md#talos-linux-installation),
+> [upgrades](https://github.com/dyegoe/homelab/blob/473d3cf/README.md#cluster-upgrades)). Start there if
+> the cluster ever has to leave Omni. `talos/secrets.yaml` in that commit still holds the etcd
+> encryption (secretbox) key the cluster uses today, since the 2026-10-26 rotations replaced only the
+> Talos and Kubernetes CAs, so keep the age private key that decrypts it
+> (`$XDG_CONFIG_HOME/sops/age/keys.txt`) backed up.
 
-The installer image comes from the [Talos Image Factory](https://factory.talos.dev/), built from
-`talos/schematic.yaml`: bare-metal, `amd64`, SecureBoot, plus the `siderolabs/iscsi-tools` and
-`siderolabs/util-linux-tools` system extensions Longhorn needs. `topf` hashes that file into the
-schematic ID itself (`schematicId: "@schematic.yaml"` in `talos/topf.yaml`); the Talos release to
-pair it with is `talosVersion` in the same file. topf combines the two into the installer image of
-the `UnattendedInstallConfig` document it generates, so neither is copied anywhere by hand — see
-[How the installer image is resolved](#how-the-installer-image-is-resolved) under Cluster Upgrades.
+To add or replace a node now:
 
-To get a bootable installer, open the factory, choose the same options (platform `bare-metal`, the
-`talosVersion` from `topf.yaml`, `amd64` with SecureBoot on, the two extensions above), and download
-the SecureBoot ISO. Write it to a USB stick:
+1. In the Omni UI, **Download Installation Media**: the `talos.version` from `talos/cluster.yaml`,
+   `amd64`, SecureBoot ISO, with the `systemExtensions` from the same file (`siderolabs/iscsi-tools`,
+   `siderolabs/util-linux-tools`, both needed by Longhorn). The media carries the Omni join token,
+   so the machine registers itself. Write it to a USB stick:
 
-```bash
-sudo dd if=metal-amd64-secureboot.iso of=/dev/sdX bs=4M status=progress && sync
-```
+   ```bash
+   sudo dd if=metal-amd64-omni-secureboot.iso of=/dev/sdX bs=4M status=progress && sync
+   ```
 
-Workstation tooling: [`talosctl`](https://www.talos.dev/latest/introduction/getting-started/)
-(`curl -sL https://talos.dev/install | sudo sh`), [`topf`](https://github.com/postfinance/topf),
-[`age`](https://github.com/FiloSottile/age), and [`sops`](https://github.com/getsops/sops/releases).
+2. Boot the node from it. It appears under **Machines** in maintenance mode; copy its machine ID.
+3. In `talos/cluster.yaml`, add the ID to `ControlPlane.machines` (removing the machine it replaces,
+   to keep an odd etcd member count) and add a `Machine` document with `install.disk: /dev/nvme0n1`
+   and a hostname patch like the others. Open a PR, then `diff` and `sync` as described in
+   [Omni](#omni-cluster-management). See Omni's
+   [scale up or down](https://docs.siderolabs.com/omni/cluster-management/scale-your-cluster/scale-a-cluster-up-or-down)
+   docs.
 
-`talos/.sops.yaml` is tracked and carries the age **public** key `talos/secrets.yaml` is encrypted
-to. The matching private key lives only in `$XDG_CONFIG_HOME/sops/age/keys.txt` on the operator's
-workstation — back it up: without it `secrets.yaml` can't be decrypted and no further machine
-configs can be rendered for this cluster. When forking this repo for a cluster of your own, generate
-a new key pair and swap the recipient in `.sops.yaml` before generating secrets:
-
-```bash
-mkdir -p $XDG_CONFIG_HOME/sops/age
-age-keygen -o $XDG_CONFIG_HOME/sops/age/keys.txt   # prints the public key - put it in talos/.sops.yaml
-```
-
-Generate and encrypt the secrets bundle **once per cluster**. Never regenerate it for an existing
-cluster: it holds the cluster CA and the tokens every node, Secret, and credential trusts.
-
-```bash
-cd talos
-topf secrets --confirm=false > secrets.yaml   # prompts before overwriting an existing bundle
-sops -e -i secrets.yaml
-```
-
-Now you can boot Talos on each node from the USB stick. `topf` detects maintenance-mode
-(insecure/unconfigured) nodes automatically — no `--insecure` flag needed — and folds config
-generation, apply, and cluster bootstrap into one step:
-
-```bash
-topf apply --auto-bootstrap
-```
-
-Save a `talosconfig` for subsequent authenticated `talosctl` operations:
-
-```bash
-topf talosconfig > talosconfig
-export TALOSCONFIG=$(pwd)/talosconfig
-# or: cp talosconfig ~/.talos/config
-```
-
-Generate an admin kubeconfig (valid 12 hours — regenerate as needed, or hand off to whatever
-longer-lived/GitOps-managed kubeconfig normally drives `kubectl` from here on):
-
-```bash
-topf kubeconfig > ~/.kube/config
-```
-
-> **Why `topf`, not `talhelper`**: this cluster originally used
-> [`talhelper`](https://github.com/budimanjojo/talhelper) to generate Talos configs. It was archived
-> and abandoned upstream on 2026-08-26, and its pinned `v3.1.17` vendors a pre-release
-> `siderolabs/talos/pkg/machinery` missing an upstream fix — which generated `KubeEtcdEncryptionConfig`
-> with the wrong secretbox key name (`key1` instead of the historically-correct `key2`) during the
-> Talos v1.14.0 multi-doc config migration, breaking `kube-apiserver`'s ability to decrypt existing
-> etcd Secrets on one node until manually patched. `topf` depends on the released `machinery v1.14.0`
-> (fix included) and is actively maintained — see commit `e186c23` for the migration.
-
-You can follow the cluster initialization progress by running the following commands:
-
-```bash
-# Check the status of the nodes
-talosctl get nodestatuses
-
-# Check the status of the members and their versions, roles, etc.
-talosctl get members
-
-# Check the status of the cluster
-talosctl dashboard
-
-# You should be able to call kubectl commands now
-kubectl get nodes
-```
+History: the configs were first generated with [`talhelper`](https://github.com/budimanjojo/talhelper),
+which was archived upstream on 2026-08-26 and vendored a pre-release Talos machinery that generated a
+wrong `KubeEtcdEncryptionConfig` key name during the Talos v1.14.0 multi-doc migration (commit
+`e186c23` moved to topf). topf was replaced by Omni on 2026-10-20 (import) and 2026-10-27 (cluster
+template).
 
 ### Network CNI
 
-Talos comes up with no CNI here — `talos/control-plane/02-kubeflannel-delete.yaml` removes the
-default Flannel and `03-kubeproxy.yaml` disables kube-proxy, since Cilium replaces both — so nodes
+Talos comes up with no CNI here — `talos/patches/platform.yaml` removes the default Flannel and
+disables kube-proxy, since Cilium replaces both — so nodes
 stay `NotReady` until Cilium is installed. ArgoCD can't do that first install: its own pods need a
 working pod network. Cilium is therefore the one addon that gets an imperative first install, which
 ArgoCD then adopts once it is running (see
@@ -298,21 +240,33 @@ under `addons/cilium/` and arrive with the `cilium` `Application` — see
 The cluster `k8s-nodes-ee` was imported into [Omni](https://omni.siderolabs.com/) SaaS (Hobby tier:
 free, up to 10 nodes) with `omnictl cluster import` and unlocked on 2026-10-20. Omni now owns the
 machine configs, Talos/Kubernetes upgrades and CA lifecycle; the local Talos API is no longer the way
-in, so use `omnictl` / the Omni UI (not `topf apply` or direct `talosctl apply-config`).
+in, so use `omnictl` / the Omni UI (not direct `talosctl apply-config`).
 
-- **Config patches** live in `talos/omni/` as `ConfigPatches` resources: cluster-scoped files
-  (`cluster-platform.yaml`, `cluster-node.yaml`, `cluster-etcd-metrics.yaml`,
-  `cluster-no-kexec.yaml`) and per-machine
-  `machine-hostname-<node>.yaml`. They are the Omni equivalent of the old `talos/all/` and
-  `talos/control-plane/` patches. Change a patch in git, open a PR, then apply:
+- **Cluster template**: `talos/cluster.yaml` is the source of truth for the cluster
+  ([reference](https://docs.siderolabs.com/omni/reference/cluster-templates)): the Talos and
+  Kubernetes versions, the system extensions, the three machines, the config patches
+  (`talos/patches/`, plus the per-machine hostnames inline), and the Longhorn upgrade healthcheck
+  (`talos/healthchecks/`, with its RBAC in `talos/manifests/`). Change it in git, open a PR, then:
 
   ```bash
-  omnictl apply -f talos/omni/ --dry-run   # review
-  omnictl apply -f talos/omni/
+  omnictl cluster template validate -f talos/cluster.yaml
+  omnictl cluster template diff -f talos/cluster.yaml     # review: only what the PR changed
+  omnictl cluster template sync -f talos/cluster.yaml
+  omnictl cluster template status -f talos/cluster.yaml   # waits until the cluster is ready
   ```
 
-  Control planes can't be locked in Omni, so a patch change rolls across all 3 nodes one at a time —
-  watch `kubectl get nodes -w` and Cilium/etcd while it runs.
+  Sync creates, updates and **deletes** the resources the template owns, so make changes in the
+  template, not in the UI: a later sync overwrites UI edits. Before syncing after a while, `diff`
+  shows any such drift (`omnictl cluster template export -c k8s-nodes-ee` prints the live state as
+  a template). File paths in the template resolve against `talos/`, so the commands work from the
+  repo root. Control planes can't be locked in Omni, so a patch change rolls across all 3 nodes one
+  at a time; watch `kubectl get nodes -w` and Cilium/etcd while it runs.
+
+  The template was adopted on 2026-10-27 from `omnictl cluster template export`, with `idOverride`
+  keeping the existing ConfigPatch IDs, so the first sync only changed comments and added the
+  extensions list, the healthcheck and its RBAC. The extensions list is the one the nodes were
+  installed with, so the schematic ID (`613e1592…`) didn't change; adding or removing an extension
+  changes it and triggers a rolling upgrade.
 
 - **Access**: day to day through Omni: `omnictl kubeconfig -c k8s-nodes-ee` (context
   `nodes-k8s-nodes-ee`, OIDC via Omni's proxy) and `omnictl talosconfig -c k8s-nodes-ee`. Both need
@@ -320,10 +274,10 @@ in, so use `omnictl` / the Omni UI (not `topf apply` or direct `talosctl apply-c
   (2026-10-26).
 - **Break-glass (Omni or internet down)**: a `cluster-admin` ServiceAccount token kubeconfig that
   talks straight to the VIP (kept in the API server certificate via `certExtraSANs` in
-  `cluster-platform.yaml`). Generating it needs a working context, so it has to exist **before** an
-  outage: it is merged into the workstation's `~/.kube/config` as context `k8s-nodes-ee-break-glass`
-  (usable fully offline), with a second copy in 1Password. Create/refresh it with
-  `kubectl apply -k break-glass/` and `break-glass/kubeconfig.sh`; revoke it by deleting the
+  `talos/patches/platform.yaml`). Generating it needs a working context, so it has to exist
+  **before** an outage: it is merged into the workstation's `~/.kube/config` as context
+  `k8s-nodes-ee-break-glass` (usable fully offline), with a second copy in 1Password. Create/refresh
+  it with `kubectl apply -k break-glass/` and `break-glass/kubeconfig.sh`; revoke it by deleting the
   `kube-system/break-glass-admin-token` Secret. It is not ArgoCD-managed on purpose. Regenerate it
   after a Kubernetes CA rotation, and test it now and then (`kubectl --context
 k8s-nodes-ee-break-glass get nodes`). A ServiceAccount token was chosen over a client certificate
@@ -332,16 +286,9 @@ k8s-nodes-ee-break-glass get nodes`). A ServiceAccount token was chosen over a c
   (`omnictl talosconfig --break-glass`) needs Sidero support to enable it.
 - **Rollback / import backup**: the pre-import machine configs are stored in 1Password (document),
   never in this repo — they contain secrets.
-- **Not carried over**: topf's `UnattendedInstallConfig` (NVMe disk selector, install-time only) and
-  `SecurityProfileConfig` (Omni sets `workloadIsolation: true` itself). Recheck the install disk
-  selection on the first Omni-driven upgrade (#136).
-- The `kubelet.image` in `cluster-node.yaml` pins the Kubernetes version: bump it together with
-  the Kubernetes upgrade in Omni.
-- **Talos upgrades**: Omni moves to the next node as soon as the previous one is Ready, but its drain
-  respects Longhorn's instance-manager PDBs with no timeout (`node-drain-policy:
-block-if-contains-last-replica`), so a node holding a volume's last healthy replica waits until the
-  rebuild finishes. "All volumes healthy" between nodes is not enforced; a node that hung and was
-  power-cycled may need `kubectl uncordon`. See [#155](https://github.com/dyegoe/homelab/issues/155).
+- **Not carried over from topf**: `SecurityProfileConfig` (Omni sets `workloadIsolation: true`
+  itself) and `UnattendedInstallConfig` (install-time only; a new node's install disk is the
+  `install.disk` of its `Machine` document).
 - **CA rotation** (`omnictl cluster -n k8s-nodes-ee secret rotate talos-ca` / `kubernetes-ca`, done
   2026-10-26 to clear `tainted-by-importing`): no reboots. After the Kubernetes CA, approve the
   pending `kubelet-serving` CSRs (`kubectl certificate approve …`) and restart
@@ -350,108 +297,77 @@ block-if-contains-last-replica`), so a node holding a volume's last healthy repl
   or `rollout restart` CoreDNS. Most controllers (Cilium, Longhorn, Alloy, Prometheus, ESO, Kargo)
   recovered on their own.
 
-Remaining migration work (etcd backups, Omni upgrade runbook, removing the archived topf files) is
-tracked in #136.
+Etcd backups are not enabled yet (tracked in #136).
 
 ## Cluster Upgrades
 
-> **Archived instructions.** The sections below describe the topf-era upgrade flow. With Omni, upgrade
-> Talos and Kubernetes from the Omni UI (cluster → Upgrade) or `omnictl`, and check the
-> [kexec known issue](#known-issue-kexec-reboot-can-hang-a-node-during-upgrade-recheck-on-the-next-talos-upgrade)
-> before the first one. This section is rewritten as part of #136.
+Talos and Kubernetes versions live in `talos/cluster.yaml` (`talos.version`, `kubernetes.version`)
+and upgrade **independently**: bumping one never triggers the other. Renovate opens a PR for each
+(see [Renovate](#renovate)); merging it changes nothing on the cluster. The upgrade starts when you
+`sync` the template, so you choose when it runs. Use the template, not the Omni UI's upgrade button:
+the next sync would revert a UI upgrade.
 
-Talos OS and Kubernetes each have their own version pinned in `talos/topf.yaml` (`talosVersion` and
-`kubernetesVersion`), and they upgrade **independently** — bumping one never triggers the other, and
-either order is fine. Neither is tracked by Renovate (`renovate.json`'s `customManagers` only watches
-`argocd/install/kustomization.yaml` and addon chart versions under `addons/`), so check the upstream
-release pages yourself and bump these by hand:
+Both upgrades are mutating cluster operations: per this repo's rule (see `CLAUDE.md`'s "Mutating
+actions" section), Claude prepares and diffs, the user runs `sync`.
 
-- Talos: <https://github.com/siderolabs/talos/releases>
-- Kubernetes: <https://github.com/kubernetes/kubernetes/releases>
+Before either upgrade:
 
-Check what's actually running before deciding what to bump to:
+- Read the release notes, and check the
+  [Talos support matrix](https://docs.siderolabs.com/talos/v1.14/getting-started/support-matrix):
+  Kubernetes must be supported by the running Talos version. Upgrade Talos first when it isn't.
+- Check the open [`talos`](https://github.com/dyegoe/homelab/issues?q=is%3Aissue+is%3Aopen+label%3Atalos)
+  and [`known-issue`](https://github.com/dyegoe/homelab/issues?q=is%3Aissue+is%3Aopen+label%3Aknown-issue)
+  issues for a recheck trigger the upgrade fires.
+- Start from a healthy cluster: every node Ready, every Longhorn volume `healthy`, ArgoCD apps
+  Synced/Healthy:
 
-```bash
-talosctl version   # client vs. each node's Talos version
-kubectl version     # client vs. server (control plane) Kubernetes version
-```
-
-Both upgrades are mutating cluster operations — per this repo's rule (see `CLAUDE.md`'s
-"Mutating actions" section), Claude prepares and dry-runs, the user runs the real command.
+  ```bash
+  kubectl get nodes
+  kubectl -n longhorn-system get volumes.longhorn.io
+  ```
 
 ### Upgrading Talos Linux
 
-1. Bump `talosVersion` in `talos/topf.yaml` to the target release.
-2. Render locally first, and grep the output for the installer image tag to confirm it actually
-   moved (no cluster contact) — see
-   [How the installer image is resolved](#how-the-installer-image-is-resolved) below for
-   why this check matters:
+1. Merge the Renovate PR (or bump `talos.version` by hand), then `git pull`.
+2. Review, then start the upgrade:
 
    ```bash
-   cd talos
-   topf render -o /tmp/topf-check --redact=false
-   grep -h 'factory.talos.dev' /tmp/topf-check/*.yaml   # tag at the end must match the bump
+   omnictl cluster template diff -f talos/cluster.yaml   # only Clusters.spec.talosversion
+   omnictl cluster template sync -f talos/cluster.yaml
    ```
 
-3. Dry-run against the live cluster:
+3. Watch it. Omni builds the installer image from `talos.version` and the schematic, so there's no
+   image to pin. It upgrades one node at a time: cordon and drain, install, reboot through firmware
+   (kexec is disabled, see the known issue below), wait for the node to be Ready, then run the
+   `longhorn-volumes` healthcheck before the next node.
 
    ```bash
-   topf upgrade --dry-run
+   omnictl get talosupgradestatus k8s-nodes-ee -o yaml   # phase, current step, healthcheck holds
+   kubectl get nodes -o wide -w                           # OS-IMAGE shows the Talos version
    ```
 
-4. Apply for real, with a full firmware reboot instead of kexec (see the
-   [known issue](#known-issue-kexec-reboot-can-hang-a-node-during-upgrade-recheck-on-the-next-talos-upgrade)
-   below), and be near the hardware while it runs:
+   Two things can hold the upgrade, and both are expected:
+   - **Drain**: Omni respects PodDisruptionBudgets with no timeout, including the ones Longhorn puts
+     on a node's instance-manager while it holds a volume's last healthy replica
+     (`node-drain-policy: block-if-contains-last-replica`). The UI shows "drain timed out" while it
+     waits ([omni#3180](https://github.com/siderolabs/omni/issues/3180)).
+   - **Healthcheck**: before each next node, `talos/healthchecks/longhorn-volumes.yaml` fails while
+     any Longhorn volume is degraded, faulted or mid attach/detach, so the next node waits until
+     the previous one's replicas have rebuilt. The step reads `waiting for healthchecks to pass:
+"longhorn-volumes": …` with the volume list. Healthchecks gate Talos upgrades only, not
+     Kubernetes upgrades or config changes
+     ([docs](https://docs.siderolabs.com/omni/cluster-management/gate-talos-upgrades-with-healthchecks)).
 
-   ```bash
-   topf upgrade --reboot-mode powercycle
-   ```
+4. If a node stays dark for more than ~10 minutes, power-cycle it. etcd keeps quorum with one node
+   down, and Omni doesn't move on until that node is healthy. Talos's A/B boot rolls a node back by
+   itself if the new kernel fails to boot, but a hang before that needs the power button. A node that
+   was power-cycled can stay cordoned: `kubectl uncordon <node>`.
+5. Check that every node is on the new version (`kubectl get nodes -o wide`) and
+   `omnictl cluster template status -f talos/cluster.yaml` reports ready.
 
-   `topf` upgrades nodes one at a time by default
-   (`--max-parallel`, though control-plane nodes are always sequential regardless — this cluster has
-   no `worker/` role to parallelize), draining and cordoning each node first, waiting for it to
-   reboot and stabilize (`--stabilization-duration`, default `30s`) before moving to the next.
-   Talos's A-B image scheme rolls a node back automatically if it fails to boot into the new version
-   — but only once the new kernel is actually running; a hang before that (firmware, or a stuck
-   kexec) needs a hard power-cycle. etcd keeps quorum with one node down, so stop `topf` (Ctrl-C)
-   before it moves on to the next node, then power-cycle the stuck one.
+Talos upgrades never touch the Kubernetes version (by design, since Talos v1.0).
 
-5. Verify every node landed on the new version:
-
-   ```bash
-   talosctl get nodestatuses
-   talosctl version
-   ```
-
-6. Commit the `topf.yaml` bump.
-
-Talos upgrades never touch the running Kubernetes version (by design, since Talos v1.0) — see below
-if kubelet/control-plane components also need to move.
-
-#### How the installer image is resolved
-
-topf generates an `UnattendedInstallConfig` document per node, with `installer.image` built from
-`talosVersion` + `schematicId` + `secureboot` in `talos/topf.yaml`. `topf upgrade` reads its target
-from the rendered config (`machine.install.image` if present, otherwise that document's
-`installer.image`), so bumping `talosVersion` is all an upgrade needs. The only override is
-`talos/all/01-unattended-install.yaml`, which sets the disk selector: topf's placeholder
-`disk.dev_path == "/dev/sda"` would match an attached Longhorn iSCSI volume on these nodes, so it
-selects `disk.transport == "nvme"` instead (each node has exactly one NVMe disk). The document only
-matters at install time; an installed node reports the install as complete and never re-runs it.
-
-Don't reintroduce `machine.install`: if it's present, `topf upgrade` takes its image first, and
-that's how the bug below happened.
-
-History: until 2026-10-12 the cluster used the legacy `machine.install` form (deleting topf's
-generated document), with the image tag hardcoded to `:v1.14.0` in a patch.
-Bumping `talosVersion` to `v1.14.1` then silently kept rendering `:v1.14.0` and `topf upgrade
---dry-run` reported "no upgrade required". This was first misdiagnosed as `topf` `v0.6.0` lacking
-`v1.14.1` machinery support, and `talosVersion` sat pinned at `v1.14.0` waiting for a stable `topf`
-`v0.6.1` — but rendering with `v0.6.1` still produced `:v1.14.0`, which exposed the hardcoded tag
-as the real cause. The tag was templated as a stopgap, then `machine.install` was retired in favour
-of `UnattendedInstallConfig` the same day ([#91](https://github.com/dyegoe/homelab/issues/91)).
-
-#### Known issue: kexec reboot can hang a node during upgrade (recheck on the next Talos upgrade)
+#### Known issue (resolved): kexec reboot hung a node during upgrades
 
 By default Talos reboots into a new version via `kexec`, jumping straight from the old kernel to the
 new one without going through firmware. During the `v1.14.0` → `v1.14.2` upgrade on 2026-10-12
@@ -467,7 +383,7 @@ identical hardware: `kihnu` is an HP EliteDesk 800 G2 DM 65W (BIOS 02.47), `muhu
 (BIOS 02.63), `ruhnu` a Lenovo `10MUS0J600`.
 
 Omni has no equivalent of `--reboot-mode powercycle`, so kexec is now disabled for good with the
-`kernel.kexec_load_disabled: "1"` sysctl in `talos/omni/cluster-no-kexec.yaml`. Talos treats the
+`kernel.kexec_load_disabled: "1"` sysctl in `talos/patches/no-kexec.yaml`. Talos treats the
 resulting `EPERM` from `kexec_file_load` as "kexec support is disabled via sysctl" and does a normal
 firmware reboot instead
 ([`kexec.go`](https://github.com/siderolabs/talos/blob/v1.14.5/internal/app/machined/pkg/runtime/v1alpha1/bootloader/kexec/kexec.go#L44-L69));
@@ -476,44 +392,33 @@ Talos sets the same sysctl itself on GCP because VMs there get stuck on kexec
 Every reboot takes a minute or two longer. The sysctl applies live, but Omni applies a pending
 upgrade **before** a pending config change on the same machine
 ([docs](https://docs.siderolabs.com/omni/cluster-management/upgrading-clusters#how-omni-rolls-out-configuration-changes-and-upgrades)),
-so make sure the patch is applied on every node before starting an upgrade. Tracked in
-[#90](https://github.com/dyegoe/homelab/issues/90).
+so never ship a change to that patch in the same sync as a Talos upgrade. Tracked in
+[#90](https://github.com/dyegoe/homelab/issues/90) (closed).
 
 ### Upgrading Kubernetes
 
-There's no `topf` subcommand for this — Kubernetes control-plane components are upgraded via
-`talosctl upgrade-k8s`, which pre-pulls the new component images, patches every control-plane node's
-static pod manifests (`kube-apiserver`, `kube-controller-manager`, `kube-scheduler`), rolls the
-`kube-proxy` daemonset, upgrades `kubelet` on every node, then re-applies and prunes bootstrap
-manifests — in that order, waiting for each phase to go healthy before starting the next.
-
-1. Bump `kubernetesVersion` in `talos/topf.yaml` to the target release (keeps future `topf
-render`/`apply` in sync with what's actually running — the field feeds `{{ .KubernetesVersion }}`
-   in any templated patch).
-2. Dry-run (any control-plane node works — `talosctl` fans the change out to the whole cluster):
+1. Merge the Renovate `kubernetes (Omni)` PR, then `git pull`. It bumps `kubernetes.version` in
+   `talos/cluster.yaml` and the `machine.kubelet.image` pin in `talos/patches/node.yaml` together.
+   The pin exists because the legacy `machine.kubelet` block (kept for Longhorn's `extraMounts`)
+   replaces the typed `KubeletConfig`, so the two must always match.
+2. Review, then start the upgrade:
 
    ```bash
-   talosctl -n <control-plane-ip> upgrade-k8s --to <version> --dry-run
+   omnictl cluster template diff -f talos/cluster.yaml   # kubernetesversion + ConfigPatch 110 image
+   omnictl cluster template sync -f talos/cluster.yaml
    ```
 
-3. Apply for real:
+   Omni pre-pulls the images, updates the control-plane static pods, then the kubelet on each node
+   ([docs](https://docs.siderolabs.com/omni/cluster-management/upgrading-clusters#what-happens-during-a-kubernetes-upgrade)).
+   No reboots, and the Longhorn healthcheck doesn't apply.
 
-   ```bash
-   talosctl -n <control-plane-ip> upgrade-k8s --to <version>
-   ```
-
-   Safe to re-run if it fails partway through — it resumes from the point of failure.
-
-4. Verify:
-
-   ```bash
-   kubectl get nodes -o wide   # every node reports the new version
-   kubectl version
-   ```
-
-5. Commit the `topf.yaml` bump. If the bump crosses a `kubernetesVersion` recheck trigger in an
-   open [`known-issue`](https://github.com/dyegoe/homelab/issues?q=is%3Aissue+is%3Aopen+label%3Aknown-issue) GitHub issue, revisit that
-   item too.
+3. Unlike `talosctl upgrade-k8s`, Omni doesn't re-apply the Kubernetes bootstrap manifests. Check the
+   cluster's **Bootstrap Manifests** panel in the Omni UI and apply what it shows if it makes sense
+   ([docs](https://docs.siderolabs.com/kubernetes-guides/advanced-guides/upgrading-kubernetes#upgrade-kubernetes-on-omni-managed-clusters)).
+4. Verify with `kubectl get nodes -o wide` and `kubectl version`. If the bump crosses a recheck
+   trigger in an open
+   [`known-issue`](https://github.com/dyegoe/homelab/issues?q=is%3Aissue+is%3Aopen+label%3Aknown-issue)
+   issue, revisit that item too.
 
 ## GitOps
 
@@ -850,6 +755,12 @@ in-repo workflow needed) and configured via `renovate.json` at the repo root. It
   `addons/cloudflared/deployment-cloudflared.yaml`) — the `kubernetes` manager, scoped to
   `addons/**/deployment*.yaml`. It ships with no default file match, so each such addon needs its
   path added explicitly (see `renovate.json`).
+- Talos and Kubernetes versions in the Omni cluster template (`talos/cluster.yaml`) and the images
+  under `talos/` — `customManagers` regex rules. `talos.version` tracks `siderolabs/talos` GitHub
+  releases; `kubernetes.version` tracks Sidero's `ghcr.io/siderolabs/kubelet` tags, so it lands in
+  one `kubernetes (Omni)` PR together with the kubelet pin in `talos/patches/node.yaml`. Merging
+  doesn't upgrade anything: the upgrade runs when the template is synced (see
+  [Cluster Upgrades](#cluster-upgrades)).
 
 `extends: ["config:recommended"]` — no automerge, so every bump still lands as a normal PR to
 review and merge by hand, same as the manual bumps this replaces.
@@ -1477,8 +1388,8 @@ Pod logs (every namespace, tailed by Alloy via the Kubernetes API — no `hostPa
 
 Available labels: `namespace`, `pod`, `container`, `node`, `job`, `service_name`.
 
-Talos's own logs (kernel + service, from all 3 nodes, shipped via `machine.logging.destinations` in
-`talos/control-plane/01-base.yaml.tpl` + `KmsgLogConfig` in `talos/control-plane/06-kmsg-log.yaml`):
+Talos's own logs (kernel + service, from all 3 nodes, shipped via `machine.logging.destinations` +
+`KmsgLogConfig` in `talos/patches/node.yaml`):
 
 ```logql
 {job="talos"}
@@ -1546,7 +1457,7 @@ to `additionalScrapeConfigs`), and Loki's chart, whose ServiceMonitor would othe
 ([#97](https://github.com/dyegoe/homelab/issues/97)).
 
 **etcd** is a native Talos host service, not a Kubernetes workload, so there's no pod for the chart's
-default `component: etcd` selector to match. `talos/control-plane/08-etcd-metrics.yaml` opens a
+default `component: etcd` selector to match. `talos/patches/etcd-metrics.yaml` opens a
 plain-HTTP metrics listener on each node (`listen-metrics-urls: http://0.0.0.0:2381`; Talos v1.14 otherwise
 serves metrics only on port 2383 behind etcd client mTLS). Applying it needs a reboot per node: Talos
 doesn't restart etcd on a spec change and refuses `talosctl service etcd restart`. Prometheus scrapes the
@@ -1554,7 +1465,7 @@ three nodes through a static `kube-etcd` job in `prometheus.prometheusSpec.addit
 through the chart's `kubeEtcd.endpoints`. That option renders a v1 `Endpoints` object, which ArgoCD's default
 `resource.exclusions` silently drops, leaving the Service with no targets. `kubeEtcd.enabled` stays on
 (with its Service/ServiceMonitor off) because it also turns on the chart's bundled etcd dashboard and alert
-rules. Keep the scrape targets in sync with `talos/topf.yaml` when nodes change
+rules. Keep the scrape targets in sync with the machines in `talos/cluster.yaml` when nodes change
 ([#96](https://github.com/dyegoe/homelab/issues/96)).
 
 Every addon with a live Prometheus target also ships its own dashboard(s), as a `ConfigMap` labeled
@@ -1762,11 +1673,14 @@ the run most likely to fail is exactly the one after a rebuild, when the stuck s
 The order things have to happen in when building this cluster from nothing. After step 5,
 cluster changes are git commits; step 6 lists the deliberate exceptions that live outside git.
 
-1. **Talos** — boot each node from the SecureBoot USB image and run `topf apply --auto-bootstrap`
-   from `talos/`. That one step applies every machine config in this repo — including the
-   control-plane patches Prometheus and Alloy depend on later (`bind-address: 0.0.0.0` for
+1. **Talos** — boot each node from Omni installation media so it registers with Omni, put the
+   machine IDs in `talos/cluster.yaml`, and `omnictl cluster template sync -f talos/cluster.yaml`.
+   That one step creates the cluster with every machine config in this repo — including the
+   patches Prometheus and Alloy depend on later (`bind-address: 0.0.0.0` for
    `kube-scheduler`/`kube-controller-manager`, `machine.logging.destinations`, `KmsgLogConfig`) —
-   and bootstraps etcd on the first node. See [Talos Linux installation](#talos-linux-installation).
+   and bootstraps etcd. The healthcheck RBAC in `talos/manifests/` keeps retrying until Longhorn's
+   namespace exists. See [Talos Linux installation](#talos-linux-installation) (the original build
+   used topf; see the archive commit linked there).
 2. **Gateway API CRDs + Cilium** — imperative, from the repo's values file. Nodes go `Ready` here.
    See [Network CNI](#network-cni).
 3. **ArgoCD** — imperative, one-time: the repo credential and the pinned upstream `install.yaml`.
