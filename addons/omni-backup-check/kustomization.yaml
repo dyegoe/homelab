@@ -1,0 +1,9 @@
+---
+# Alerts when Omni's daily etcd backup stops landing in R2 (talos/cluster.yaml
+# features.backupConfiguration). Omni SaaS metrics don't reach this Prometheus, so the CronJob
+# fails instead, and kube-prometheus-stack's built-in KubeJobFailed alert carries it to Telegram.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - externalsecret-r2-readonly.yaml
+  - cronjob-omni-backup-check.yaml

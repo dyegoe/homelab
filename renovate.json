@@ -10,7 +10,7 @@
   },
   "kubernetes": {
     "managerFilePatterns": [
-      "/^addons/.+/deployment.*\\.ya?ml$/"
+      "/^addons/.+/(deployment|cronjob).*\\.ya?ml$/"
     ]
   },
   "customManagers": [

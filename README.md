@@ -352,7 +352,15 @@ AccessDenied` while the same keys work from the workstation.
 
    With no previous backup, Omni takes the first one right away.
 
-Check (there's no alert: Omni SaaS metrics aren't scraped by this cluster's Prometheus):
+**Alerting**: Omni SaaS metrics don't reach this cluster's Prometheus, so the `omni-backup-check`
+addon (`addons/omni-backup-check/`) runs a CronJob every 4h that lists the bucket with a read-only R2
+token (1Password item `homelab-omni-etcd-backup-ro`, IP-filtered to the home IP the cluster egresses
+from) and **fails** if the newest snapshot is older than 26h or the bucket can't be listed.
+kube-prometheus-stack's built-in `KubeJobFailed` then fires to Telegram after 15m. The reason is in
+the failed pod's log (`kubectl -n omni-backup-check logs job/<name>`). Failed Jobs expire after 5h,
+so the alert resolves within 5h of the first good run.
+
+Check by hand:
 
 ```bash
 omnictl get etcdbackupoverallstatus      # LAST BACKUP STATUS / ERROR / TIME
@@ -805,6 +813,7 @@ Adding an app is one `config.json` plus the 1Password items it references — th
 | `argo-rollouts`                 | `-1`      | yes       | Progressive-delivery controller for tenant apps' `Rollout` resources — see the `rollouts-pod-template-hash` `ignoreDifferences` note under [Kargo](#kargo)                       |
 | `alloy`                         | `0`       | yes       | Log shipping - pods via the Kubernetes API, Talos's own logs via a LoadBalancer Service                                                                                          |
 | `cloudnative-pg`                | `0`       | yes       | CloudNativePG Postgres operator (`cnpg-system` namespace) - webhook `caBundle` is self-managed by the operator at runtime, so it's excluded via `ignoreDifferences`              |
+| `omni-backup-check`             | `0`       | yes       | CronJob that fails (→ `KubeJobFailed`) when Omni's etcd backups stop landing in R2 — see [Etcd backups](#etcd-backups)                                                           |
 | `kargo`                         | `1`       | yes       | Platform; the hosted apps (`website`, `helloworld`, `catering-calculator`) are provisioned via `charts/tenant` — see [Kargo](#kargo)                                             |
 
 ### Renovate
@@ -819,7 +828,7 @@ in-repo workflow needed) and configured via `renovate.json` at the repo root. It
   tag in the remote-resource URL.
 - Plain-manifest image tags (an addon with no Helm chart at all, e.g. `cloudflared`'s
   `addons/cloudflared/deployment-cloudflared.yaml`) — the `kubernetes` manager, scoped to
-  `addons/**/deployment*.yaml`. It ships with no default file match, so each such addon needs its
+  `addons/**/deployment*.yaml` and `addons/**/cronjob*.yaml`. It ships with no default file match, so each such addon needs its
   path added explicitly (see `renovate.json`).
 - Talos and Kubernetes versions in the Omni cluster template (`talos/cluster.yaml`) and the images
   under `talos/` — `customManagers` regex rules. `talos.version` tracks `siderolabs/talos` GitHub
