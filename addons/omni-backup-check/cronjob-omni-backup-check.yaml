@@ -21,6 +21,14 @@ spec:
         spec:
           restartPolicy: Never
           automountServiceAccountToken: false
+          # Pods inherit the nodes' `nodes.ee` search domain, and any name under nodes.ee answers
+          # NOERROR with no records. With the default ndots:5, the R2 hostname (3 dots) is tried as
+          # `<host>.nodes.ee` first; Alpine's musl stops at that empty answer (only NXDOMAIN moves on
+          # to the next domain), so the lookup failed. ndots:2 resolves it as-is first.
+          dnsConfig:
+            options:
+              - name: ndots
+                value: "2"
           securityContext:
             runAsNonRoot: true
             runAsUser: 65534
