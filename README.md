@@ -328,7 +328,9 @@ Set up (one time; mutating, run it yourself):
    Infrequent Access). Under the bucket's **Settings → Object lifecycle rules**, add a rule that
    deletes objects 30 days after upload.
 2. R2 → **Manage API tokens** → create a token with **Object Read & Write**, applied to bucket
-   `omni-etcd-backup` only.
+   `omni-etcd-backup` only, with **no client IP filtering**: Omni SaaS calls R2 from Sidero's
+   servers, so a token limited to the home IP fails Omni's validation with `ListObjects ... 403
+AccessDenied` while the same keys work from the workstation.
 3. Create the 1Password item with the token's keys and the account's S3 endpoint
    (`https://<account-id>.r2.cloudflarestorage.com`, the same endpoint as `homelab-longhorn-r2-backup`):
 
