@@ -1,0 +1,17 @@
+# Omni etcd backup target: Cloudflare R2 bucket `omni-etcd-backup`. Account-wide in Omni, so it is
+# not part of the cluster template; the backup interval is `features.backupConfiguration` in
+# talos/cluster.yaml. The values are 1Password secret references (Kubernetes vault, with the
+# other homelab items), resolved at apply time:
+#   omnictl apply -f <(op inject -i talos/omni-resources/etcd-backup-s3-config.yaml)
+# Omni validates the credentials by listing the bucket and refuses the resource if that fails.
+metadata:
+  namespace: default
+  type: EtcdBackupS3Configs.omni.sidero.dev
+  id: etcd-backup-s3-conf
+spec:
+  bucket: omni-etcd-backup
+  region: auto # R2 has no regions
+  endpoint: "{{ op://Kubernetes/homelab-omni-etcd-backup/AWS_ENDPOINTS }}"
+  accesskeyid: "{{ op://Kubernetes/homelab-omni-etcd-backup/AWS_ACCESS_KEY_ID }}"
+  secretaccesskey: "{{ op://Kubernetes/homelab-omni-etcd-backup/AWS_SECRET_ACCESS_KEY }}"
+  sessiontoken: ""

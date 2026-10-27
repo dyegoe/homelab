@@ -23,6 +23,11 @@ talos:
   version: v1.14.5
 features:
   disablePublicDiscoveryService: false
+  # Daily etcd snapshot to the R2 bucket in talos/omni-resources/etcd-backup-s3-config.yaml (applied
+  # first). Omni encrypts each one with a per-cluster key it keeps itself, so they only restore
+  # through Omni. ~80 MB each; the bucket's lifecycle rule expires them after 30 days.
+  backupConfiguration:
+    interval: 24h
 # Longhorn needs both. Same list as the image the nodes were installed from, so the schematic ID
 # (613e1592…) is unchanged; adding/removing one triggers a rolling upgrade.
 systemExtensions:
