@@ -86,6 +86,7 @@ are closed as _not planned_, so the reasoning stays searchable. The longer write
     - [Talos Linux installation](#talos-linux-installation)
     - [Network CNI](#network-cni)
   - [Omni (cluster management)](#omni-cluster-management)
+    - [Etcd backups](#etcd-backups)
   - [Cluster Upgrades](#cluster-upgrades)
     - [Upgrading Talos Linux](#upgrading-talos-linux)
       - [Known issue (resolved): kexec reboot hung a node during upgrades](#known-issue-resolved-kexec-reboot-hung-a-node-during-upgrades)
@@ -297,7 +298,71 @@ k8s-nodes-ee-break-glass get nodes`). A ServiceAccount token was chosen over a c
   or `rollout restart` CoreDNS. Most controllers (Cilium, Longhorn, Alloy, Prometheus, ESO, Kargo)
   recovered on their own.
 
-Etcd backups are not enabled yet (tracked in #136).
+### Etcd backups
+
+Omni takes a daily etcd snapshot (`features.backupConfiguration.interval: 24h` in
+`talos/cluster.yaml`) and uploads it to the Cloudflare R2 bucket `omni-etcd-backup`. On Omni SaaS
+you bring your own S3-compatible storage: until an `EtcdBackupS3Configs` resource exists,
+`omnictl get etcdbackupoverallstatus` reports `s3` / `not initialized`
+([docs](https://docs.siderolabs.com/omni/cluster-management/etcd-backups)).
+
+- **Encryption**: Omni encrypts every snapshot with a random per-cluster key it generates and keeps
+  in its own state
+  ([`etcd_backup_encryption.go`](https://github.com/siderolabs/omni/blob/main/internal/backend/runtime/omni/controllers/omni/etcd_backup_encryption.go),
+  [`crypt.go`](https://github.com/siderolabs/omni/blob/main/internal/backend/runtime/omni/controllers/omni/internal/etcdbackup/crypt/crypt.go)).
+  The bucket contents are useless without Omni, and only restore through Omni. They protect
+  against losing the cluster's etcd, not against losing the Omni account.
+- **Storage**: a separate bucket from `longhorn-backup`, with an R2 API token scoped to **Object
+  Read & Write on that bucket only**. Omni never deletes old snapshots, so the bucket has a
+  lifecycle rule that deletes objects after 30 days. Each snapshot is about the etcd DB size
+  (~80 MB, `talosctl -n 172.31.86.11 etcd status`), so ~2.4 GB at steady state. That fits the R2
+  free tier (10 GB-month) together with the Longhorn backups (see [Backups](#backups-cloudflare-r2)).
+- **Credentials**: 1Password item `homelab-omni-etcd-backup` in the **Private** vault (fields
+  `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINTS`). It's not in the `Kubernetes`
+  vault, since nothing in the cluster needs it. `talos/omni-resources/etcd-backup-s3-config.yaml`
+  holds only `op://` references. The S3 config is account-wide in Omni, so it isn't part of the
+  cluster template.
+
+Set up (one time; mutating, run it yourself):
+
+1. Cloudflare dashboard → R2: create bucket `omni-etcd-backup` (Standard storage class, not
+   Infrequent Access). Under the bucket's **Settings → Object lifecycle rules**, add a rule that
+   deletes objects 30 days after upload.
+2. R2 → **Manage API tokens** → create a token with **Object Read & Write**, applied to bucket
+   `omni-etcd-backup` only.
+3. Create the 1Password item with the token's keys and the account's S3 endpoint
+   (`https://<account-id>.r2.cloudflarestorage.com`, the same endpoint as `homelab-longhorn-r2-backup`):
+
+   ```bash
+   op item create --vault Private --category "API Credential" --title homelab-omni-etcd-backup \
+     'AWS_ACCESS_KEY_ID[text]=<access key id>' \
+     'AWS_SECRET_ACCESS_KEY[password]=<secret access key>' \
+     "AWS_ENDPOINTS[text]=$(op read 'op://Kubernetes/homelab-longhorn-r2-backup/AWS_ENDPOINTS')"
+   ```
+
+4. Give Omni the S3 config, check it, then enable the schedule:
+
+   ```bash
+   omnictl apply -f <(op inject -i talos/omni-resources/etcd-backup-s3-config.yaml)
+   omnictl get etcdbackupoverallstatus          # CONFIGURATION ERROR empty
+   omnictl cluster template diff -f talos/cluster.yaml
+   omnictl cluster template sync -f talos/cluster.yaml
+   ```
+
+   With no previous backup, Omni takes the first one right away.
+
+Check (there's no alert: Omni SaaS metrics aren't scraped by this cluster's Prometheus):
+
+```bash
+omnictl get etcdbackupoverallstatus      # LAST BACKUP STATUS / ERROR / TIME
+omnictl get etcdbackup -l omni.sidero.dev/cluster=k8s-nodes-ee
+```
+
+A manual backup (e.g. before a risky change): apply an `EtcdManualBackups` resource with the
+current time, as in the [docs](https://docs.siderolabs.com/omni/cluster-management/etcd-backups#create-a-manual-backup).
+To restore, follow
+[Restore etcd of a cluster managed by cluster templates](https://docs.siderolabs.com/omni/cluster-management/restore-etcd-of-a-cluster-managed-by-cluster-templates).
+It recreates the cluster from the template with a `bootstrapSpec` that points at the snapshot.
 
 ## Cluster Upgrades
 
