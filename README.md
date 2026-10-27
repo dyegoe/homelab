@@ -317,11 +317,10 @@ you bring your own S3-compatible storage: until an `EtcdBackupS3Configs` resourc
   lifecycle rule that deletes objects after 30 days. Each snapshot is about the etcd DB size
   (~80 MB, `talosctl -n 172.31.86.11 etcd status`), so ~2.4 GB at steady state. That fits the R2
   free tier (10 GB-month) together with the Longhorn backups (see [Backups](#backups-cloudflare-r2)).
-- **Credentials**: 1Password item `homelab-omni-etcd-backup` in the **Private** vault (fields
-  `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINTS`). It's not in the `Kubernetes`
-  vault, since nothing in the cluster needs it. `talos/omni-resources/etcd-backup-s3-config.yaml`
-  holds only `op://` references. The S3 config is account-wide in Omni, so it isn't part of the
-  cluster template.
+- **Credentials**: 1Password item `homelab-omni-etcd-backup` in the `Kubernetes` vault, with the
+  other homelab items (fields `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINTS`).
+  `talos/omni-resources/etcd-backup-s3-config.yaml` holds only `op://` references. The S3 config is
+  account-wide in Omni, so it isn't part of the cluster template.
 
 Set up (one time; mutating, run it yourself):
 
@@ -334,7 +333,7 @@ Set up (one time; mutating, run it yourself):
    (`https://<account-id>.r2.cloudflarestorage.com`, the same endpoint as `homelab-longhorn-r2-backup`):
 
    ```bash
-   op item create --vault Private --category "API Credential" --title homelab-omni-etcd-backup \
+   op item create --vault Kubernetes --category "API Credential" --title homelab-omni-etcd-backup \
      'AWS_ACCESS_KEY_ID[text]=<access key id>' \
      'AWS_SECRET_ACCESS_KEY[password]=<secret access key>' \
      "AWS_ENDPOINTS[text]=$(op read 'op://Kubernetes/homelab-longhorn-r2-backup/AWS_ENDPOINTS')"
