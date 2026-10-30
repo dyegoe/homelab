@@ -91,6 +91,7 @@ are closed as _not planned_, so the reasoning stays searchable. The longer write
     - [Upgrading Talos Linux](#upgrading-talos-linux)
       - [Known issue (resolved): kexec reboot hung a node during upgrades](#known-issue-resolved-kexec-reboot-hung-a-node-during-upgrades)
     - [Upgrading Kubernetes](#upgrading-kubernetes)
+      - [Known issue: Omni's kubelet upgrade patch conflicts with machine.kubelet (recheck on the next Omni release)](#known-issue-omnis-kubelet-upgrade-patch-conflicts-with-machinekubelet-recheck-on-the-next-omni-release)
   - [GitOps](#gitops)
     - [Architecture](#architecture)
     - [Bootstrap (from zero)](#bootstrap-from-zero)
@@ -493,6 +494,36 @@ so never ship a change to that patch in the same sync as a Talos upgrade. Tracke
    trigger in an open
    [`known-issue`](https://github.com/dyegoe/homelab/issues?q=is%3Aissue+is%3Aopen+label%3Aknown-issue)
    issue, revisit that item too.
+
+#### Known issue: Omni's kubelet upgrade patch conflicts with machine.kubelet (recheck on the next Omni release)
+
+**Status: open, blocks Kubernetes upgrades.** Tracked in
+[#173](https://github.com/dyegoe/homelab/issues/173), upstream
+[omni#3605](https://github.com/siderolabs/omni/issues/3605). On 2026-10-30, the first Omni-driven
+Kubernetes upgrade (`v1.37.1` → `v1.37.2`, #168) updated the control plane and then stopped at
+`kihnu: updating kubelet to 1.37.2`. kihnu's `ClusterMachineStatus` showed
+`kubelet config is already set in v1alpha1 config (.machine.kubelet)`, and the node kept its last
+good config, with the kubelet still on `v1.37.1`.
+
+For Talos >= 1.14, Omni sets the kubelet image with a typed `KubeletConfig` document in its
+`900-cm-<machine>-kubernetes-upgrade` patch
+([omni@edcc256](https://github.com/siderolabs/omni/commit/edcc256921e8be2e60e92cbc6fdd4c61eff25fd1)).
+Talos rejects that document whenever `.machine.kubelet` is set at all
+([`kubelet.go`](https://github.com/siderolabs/talos/blob/main/pkg/machinery/config/types/k8s/kubelet.go),
+`V1Alpha1ConflictValidate`). `talos/patches/node.yaml` has to keep that block, because
+`.machine.kubelet.extraMounts` (Longhorn's `/var/mnt/longhorn` bind mount) has no equivalent in the
+typed documents
+([v1.14 what's new](https://docs.siderolabs.com/talos/v1.14/getting-started/what's-new-in-talos#kubernetes-multi-document-configuration)).
+Running the upgrade through `sync` instead of the Omni UI would have failed the same way.
+
+Until it's fixed:
+
+- Don't run the runbook above, and don't `sync` a template whose kubelet pin is ahead of the live
+  `110-k8s-nodes-ee-node` patch. The pin would upgrade the kubelets on the other nodes through our
+  patch while kihnu stays stuck.
+- Don't drop the `machine.kubelet` block to get past it: that removes Longhorn's bind mount.
+- Recheck when an Omni release fixes omni#3605, or when Talos adds `extraMounts` to the typed
+  kubelet config.
 
 ## GitOps
 
