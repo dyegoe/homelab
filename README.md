@@ -91,7 +91,7 @@ are closed as _not planned_, so the reasoning stays searchable. The longer write
     - [Upgrading Talos Linux](#upgrading-talos-linux)
       - [Known issue (resolved): kexec reboot hung a node during upgrades](#known-issue-resolved-kexec-reboot-hung-a-node-during-upgrades)
     - [Upgrading Kubernetes](#upgrading-kubernetes)
-      - [Known issue: Omni's kubelet upgrade patch conflicts with machine.kubelet (recheck on the next Omni release)](#known-issue-omnis-kubelet-upgrade-patch-conflicts-with-machinekubelet-recheck-on-the-next-omni-release)
+      - [Known issue (fixed): Omni's kubelet upgrade patch conflicted with machine.kubelet](#known-issue-fixed-omnis-kubelet-upgrade-patch-conflicted-with-machinekubelet)
   - [GitOps](#gitops)
     - [Architecture](#architecture)
     - [Bootstrap (from zero)](#bootstrap-from-zero)
@@ -473,13 +473,12 @@ so never ship a change to that patch in the same sync as a Talos upgrade. Tracke
 ### Upgrading Kubernetes
 
 1. Merge the Renovate `kubernetes (Omni)` PR, then `git pull`. It bumps `kubernetes.version` in
-   `talos/cluster.yaml` and the `machine.kubelet.image` pin in `talos/patches/node.yaml` together.
-   The pin exists because the legacy `machine.kubelet` block (kept for Longhorn's `extraMounts`)
-   replaces the typed `KubeletConfig`, so the two must always match.
+   `talos/cluster.yaml`. There's no kubelet pin to keep in step: `talos/patches/node.yaml` uses the
+   typed `KubeletConfig` without an `image`, and Omni sets it during the upgrade.
 2. Review, then start the upgrade:
 
    ```bash
-   omnictl cluster template diff -f talos/cluster.yaml   # kubernetesversion + ConfigPatch 110 image
+   omnictl cluster template diff -f talos/cluster.yaml   # only kubernetesversion
    omnictl cluster template sync -f talos/cluster.yaml
    ```
 
@@ -495,35 +494,35 @@ so never ship a change to that patch in the same sync as a Talos upgrade. Tracke
    [`known-issue`](https://github.com/dyegoe/homelab/issues?q=is%3Aissue+is%3Aopen+label%3Aknown-issue)
    issue, revisit that item too.
 
-#### Known issue: Omni's kubelet upgrade patch conflicts with machine.kubelet (recheck on the next Omni release)
+#### Known issue (fixed): Omni's kubelet upgrade patch conflicted with machine.kubelet
 
-**Status: open, blocks Kubernetes upgrades.** Tracked in
+**Status: fixed in config, verify after the sync rolls out.** Tracked in
 [#173](https://github.com/dyegoe/homelab/issues/173), upstream
 [omni#3605](https://github.com/siderolabs/omni/issues/3605). On 2026-10-30, the first Omni-driven
 Kubernetes upgrade (`v1.37.1` → `v1.37.2`, #168) updated the control plane and then stopped at
 `kihnu: updating kubelet to 1.37.2`. kihnu's `ClusterMachineStatus` showed
 `kubelet config is already set in v1alpha1 config (.machine.kubelet)`, and the node kept its last
-good config, with the kubelet still on `v1.37.1`.
+good config, with the kubelet still on `v1.37.1`. Only kihnu failed because Omni updates kubelets
+one node at a time and waits for the cluster to be ready before the next one.
 
 For Talos >= 1.14, Omni sets the kubelet image with a typed `KubeletConfig` document in its
 `900-cm-<machine>-kubernetes-upgrade` patch
 ([omni@edcc256](https://github.com/siderolabs/omni/commit/edcc256921e8be2e60e92cbc6fdd4c61eff25fd1)).
 Talos rejects that document whenever `.machine.kubelet` is set at all
 ([`kubelet.go`](https://github.com/siderolabs/talos/blob/main/pkg/machinery/config/types/k8s/kubelet.go),
-`V1Alpha1ConflictValidate`). `talos/patches/node.yaml` has to keep that block, because
-`.machine.kubelet.extraMounts` (Longhorn's `/var/mnt/longhorn` bind mount) has no equivalent in the
-typed documents
+`V1Alpha1ConflictValidate`). `talos/patches/node.yaml` still had the legacy block, kept for
+Longhorn's `extraMounts` bind mount, which the typed documents don't support
 ([v1.14 what's new](https://docs.siderolabs.com/talos/v1.14/getting-started/what's-new-in-talos#kubernetes-multi-document-configuration)).
-Running the upgrade through `sync` instead of the Omni UI would have failed the same way.
 
-Until it's fixed:
-
-- Don't run the runbook above, and don't `sync` a template whose kubelet pin is ahead of the live
-  `110-k8s-nodes-ee-node` patch. The pin would upgrade the kubelets on the other nodes through our
-  patch while kihnu stays stuck.
-- Don't drop the `machine.kubelet` block to get past it: that removes Longhorn's bind mount.
-- Recheck when an Omni release fixes omni#3605, or when Talos adds `extraMounts` to the typed
-  kubelet config.
+The Sidero maintainers' answer on omni#3605: on Talos 1.14, manage Kubernetes components with the
+typed documents only. The fix was to move the kubelet settings to a typed `KubeletConfig` (no image
+pin) and to replace `extraMounts` with a `UserVolumeConfig` of `volumeType: directory` named
+`longhorn`. Talos always bind-mounts `/var/mnt` into the kubelet
+([`kubelet.go`](https://github.com/siderolabs/talos/blob/v1.14.5/internal/app/machined/pkg/system/services/kubelet.go#L169)),
+so the extra mount isn't needed, and a `directory` volume stays on the `EPHEMERAL` partition where
+`/var/mnt/longhorn` already was. This matches Sidero's
+[Longhorn guide](https://docs.siderolabs.com/kubernetes-guides/csi/longhorn#step-1-provision-a-dedicated-disk-with-uservolumeconfig).
+Don't add legacy v1alpha1 fields for Kubernetes components back.
 
 ## GitOps
 
@@ -863,9 +862,9 @@ in-repo workflow needed) and configured via `renovate.json` at the repo root. It
   path added explicitly (see `renovate.json`).
 - Talos and Kubernetes versions in the Omni cluster template (`talos/cluster.yaml`) and the images
   under `talos/` — `customManagers` regex rules. `talos.version` tracks `siderolabs/talos` GitHub
-  releases; `kubernetes.version` tracks Sidero's `ghcr.io/siderolabs/kubelet` tags, so it lands in
-  one `kubernetes (Omni)` PR together with the kubelet pin in `talos/patches/node.yaml`. Merging
-  doesn't upgrade anything: the upgrade runs when the template is synced (see
+  releases; `kubernetes.version` tracks Sidero's `ghcr.io/siderolabs/kubelet` tags and lands as a
+  `kubernetes (Omni)` PR. Merging doesn't upgrade anything: the upgrade runs when the template is
+  synced (see
   [Cluster Upgrades](#cluster-upgrades)).
 
 `extends: ["config:recommended"]` — no automerge, so every bump still lands as a normal PR to

@@ -1,28 +1,7 @@
 # Cluster-wide Talos config patch: kubelet, VIP and log shipping. Referenced from
 # talos/cluster.yaml (ConfigPatch 110-k8s-nodes-ee-node).
 ---
-# Legacy machine.kubelet stays: KubeletConfig has no equivalent for extraMounts (Longhorn's
-# /var/mnt/longhorn bind mount), so the typed document is deleted below.
-apiVersion: v1alpha1
-kind: KubeletConfig
-$patch: delete
----
 machine:
-  kubelet:
-    # Must match kubernetes.version in talos/cluster.yaml (Renovate bumps both in one PR).
-    image: ghcr.io/siderolabs/kubelet:v1.37.2
-    defaultRuntimeSeccompProfileEnabled: true
-    disableManifestsDirectory: true
-    extraArgs:
-      rotate-server-certificates: "true"
-    extraMounts:
-      - destination: /var/mnt/longhorn
-        type: bind
-        source: /var/mnt/longhorn
-        options:
-          - bind
-          - rshared
-          - rw
   network:
     interfaces:
       - deviceSelector:
@@ -35,6 +14,19 @@ machine:
       # Alloy's alloy-talos-logs LoadBalancer Service
       - endpoint: tcp://172.31.100.2:5140/
         format: json_lines
+---
+# Typed kubelet config (Talos 1.14+). No image pin: Omni sets it from kubernetes.version.
+apiVersion: v1alpha1
+kind: KubeletConfig
+defaultRuntimeSeccompProfileEnabled: true
+extraArgs:
+  rotate-server-certificates: "true"
+---
+# Longhorn's data path. The kubelet already sees /var/mnt, so no extraMounts needed.
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+name: longhorn # becomes /var/mnt/longhorn, the path Longhorn already uses
+volumeType: directory # a directory on the existing EPHEMERAL partition: no disk, no formatting
 ---
 # Kernel/dmesg logs to the same Alloy Service.
 apiVersion: v1alpha1

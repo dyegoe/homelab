@@ -4,7 +4,7 @@
 #   omnictl cluster template diff -f talos/cluster.yaml   # review against the live cluster
 #   omnictl cluster template sync -f talos/cluster.yaml   # user runs this
 # Changing talos.version or kubernetes.version here is the upgrade; see README's Cluster Upgrades.
-# Renovate bumps both versions (and the kubelet image in patches/node.yaml) via renovate.json.
+# Renovate bumps both versions via renovate.json. No kubelet pin: Omni sets the image itself.
 kind: Cluster
 name: k8s-nodes-ee
 kubernetes:

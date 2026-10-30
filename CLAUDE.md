@@ -28,10 +28,13 @@ from [Renovate](https://docs.renovatebot.com/) (see `renovate.json`).
   was removed; it lives at commit `473d3cf`. Never run `topf apply` against this cluster. That
   commit's `secrets.yaml` still holds the etcd secretbox key in use: never regenerate it.
 - `$patch: delete` on a document (or a map key, e.g. the `taints` list) removes something Talos
-  generates by default: used for `KubeletConfig` (legacy `machine.kubelet` stays, since the typed
-  doc has no equivalent for `extraMounts`, needed for Longhorn's bind mount; that's also why
-  `talos/patches/node.yaml` pins the kubelet image, which must match `kubernetes.version`),
-  `KubeFlannelCNIConfig` (Cilium is the CNI) and the control-plane `NoSchedule` taint.
+  generates by default: used for `KubeFlannelCNIConfig` (Cilium is the CNI) and the control-plane
+  `NoSchedule` taint.
+- Kubernetes components use the Talos 1.14 typed documents, never the legacy v1alpha1 fields
+  (`machine.kubelet`, `cluster.apiServer`, ...): Omni's Kubernetes upgrades patch the typed docs, and
+  Talos rejects a typed doc next to its legacy block (see #173). The kubelet is a typed
+  `KubeletConfig` with no image pin, and Longhorn's `/var/mnt/longhorn` is a `directory`
+  `UserVolumeConfig` (the kubelet already sees `/var/mnt`, so no `extraMounts`).
 - The cluster is a 3-node, all-control-plane topology on VLAN 86 (`172.31.86.0/24`), fronted by a
   Talos VIP at `172.31.86.10` for the Kubernetes API.
 
@@ -56,8 +59,8 @@ locked, so a patch change rolls across all 3 nodes one at a time. Never put a ch
 
 **Upgrading Talos or Kubernetes**: full runbook in README.md's `Cluster Upgrades` section. Summary:
 `talos.version` / `kubernetes.version` in `talos/cluster.yaml` upgrade independently; Renovate opens
-the bump PRs (Kubernetes grouped with the kubelet pin), and the upgrade happens on `sync`, not on
-merge. Check the Talos support matrix before a Kubernetes bump.
+the bump PRs, and the upgrade happens on `sync`, not on merge. Check the Talos support matrix
+before a Kubernetes bump.
 
 ## GitOps architecture
 
