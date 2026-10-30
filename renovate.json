@@ -39,7 +39,7 @@
     },
     {
       "customType": "regex",
-      "description": "Kubernetes version in the Omni cluster template; tracks Sidero's kubelet image so it moves with the pin in talos/patches/node.yaml",
+      "description": "Kubernetes version in the Omni cluster template; tracks Sidero's kubelet image tags, since that is what Omni rolls out",
       "managerFilePatterns": [
         "/^talos/cluster\\.yaml$/"
       ],
@@ -63,7 +63,7 @@
   ],
   "packageRules": [
     {
-      "description": "Kubernetes version and kubelet image are one upgrade: one PR, applied with omnictl cluster template sync",
+      "description": "Kubernetes version bumps land as one kubernetes (Omni) PR, applied with omnictl cluster template sync",
       "matchDepNames": [
         "ghcr.io/siderolabs/kubelet"
       ],
