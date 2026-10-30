@@ -91,7 +91,7 @@ are closed as _not planned_, so the reasoning stays searchable. The longer write
     - [Upgrading Talos Linux](#upgrading-talos-linux)
       - [Known issue (resolved): kexec reboot hung a node during upgrades](#known-issue-resolved-kexec-reboot-hung-a-node-during-upgrades)
     - [Upgrading Kubernetes](#upgrading-kubernetes)
-      - [Known issue (fixed): Omni's kubelet upgrade patch conflicted with machine.kubelet](#known-issue-fixed-omnis-kubelet-upgrade-patch-conflicted-with-machinekubelet)
+      - [Known issue (resolved): Omni's kubelet upgrade patch conflicted with machine.kubelet](#known-issue-resolved-omnis-kubelet-upgrade-patch-conflicted-with-machinekubelet)
   - [GitOps](#gitops)
     - [Architecture](#architecture)
     - [Bootstrap (from zero)](#bootstrap-from-zero)
@@ -494,10 +494,10 @@ so never ship a change to that patch in the same sync as a Talos upgrade. Tracke
    [`known-issue`](https://github.com/dyegoe/homelab/issues?q=is%3Aissue+is%3Aopen+label%3Aknown-issue)
    issue, revisit that item too.
 
-#### Known issue (fixed): Omni's kubelet upgrade patch conflicted with machine.kubelet
+#### Known issue (resolved): Omni's kubelet upgrade patch conflicted with machine.kubelet
 
-**Status: fixed in config, verify after the sync rolls out.** Tracked in
-[#173](https://github.com/dyegoe/homelab/issues/173), upstream
+**Status: resolved 2026-10-30 by [#175](https://github.com/dyegoe/homelab/pull/175).** Tracked in
+[#173](https://github.com/dyegoe/homelab/issues/173) (closed), upstream
 [omni#3605](https://github.com/siderolabs/omni/issues/3605). On 2026-10-30, the first Omni-driven
 Kubernetes upgrade (`v1.37.1` → `v1.37.2`, #168) updated the control plane and then stopped at
 `kihnu: updating kubelet to 1.37.2`. kihnu's `ClusterMachineStatus` showed
@@ -522,7 +522,9 @@ pin) and to replace `extraMounts` with a `UserVolumeConfig` of `volumeType: dire
 so the extra mount isn't needed, and a `directory` volume stays on the `EPHEMERAL` partition where
 `/var/mnt/longhorn` already was. This matches Sidero's
 [Longhorn guide](https://docs.siderolabs.com/kubernetes-guides/csi/longhorn#step-1-provision-a-dedicated-disk-with-uservolumeconfig).
-Don't add legacy v1alpha1 fields for Kubernetes components back.
+After the sync, the stuck upgrade finished on its own (all kubelets on `v1.37.2`), and Longhorn's
+`longhorn-disk.cfg` and replica directories were identical before and after on every node. Don't
+add legacy v1alpha1 fields for Kubernetes components back.
 
 ## GitOps
 
