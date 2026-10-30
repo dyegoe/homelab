@@ -10,7 +10,7 @@ $patch: delete
 machine:
   kubelet:
     # Must match kubernetes.version in talos/cluster.yaml (Renovate bumps both in one PR).
-    image: ghcr.io/siderolabs/kubelet:v1.37.1
+    image: ghcr.io/siderolabs/kubelet:v1.37.2
     defaultRuntimeSeccompProfileEnabled: true
     disableManifestsDirectory: true
     extraArgs:
