@@ -8,7 +8,7 @@
 kind: Cluster
 name: k8s-nodes-ee
 kubernetes:
-  version: v1.37.1
+  version: v1.37.2
   manifests:
     - name: longhorn-healthcheck-rbac
       mode: full
