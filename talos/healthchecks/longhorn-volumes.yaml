@@ -23,7 +23,7 @@ spec:
       containers:
         - name: check
           # Needs a shell + kubectl; registry.k8s.io/kubectl is shell-less.
-          image: docker.io/alpine/k8s:1.37.1
+          image: docker.io/alpine/k8s:1.37.2
           env:
             - name: HOME # kubectl's discovery cache
               value: /tmp
