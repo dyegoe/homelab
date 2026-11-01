@@ -38,7 +38,7 @@ spec:
           containers:
             - name: check
               # aws CLI + jq + a shell; same image as talos/healthchecks/longhorn-volumes.yaml.
-              image: docker.io/alpine/k8s:1.37.1
+              image: docker.io/alpine/k8s:1.37.2
               env:
                 - name: BUCKET
                   value: omni-etcd-backup
