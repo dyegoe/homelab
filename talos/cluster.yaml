@@ -42,7 +42,7 @@ patches:
     file: patches/platform.yaml
   - idOverride: 110-k8s-nodes-ee-node
     annotations:
-      name: Node (kubelet, VIP, logging)
+      name: Node (kubelet, VIP, DNS, logging)
     file: patches/node.yaml
   - idOverride: 120-k8s-nodes-ee-etcd-metrics
     annotations:
