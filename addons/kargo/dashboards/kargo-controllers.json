@@ -2,7 +2,7 @@
   "id": null,
   "uid": "kargo-controllers",
   "title": "Kargo Controllers",
-  "description": "Kargo exposes no business-level metrics (no per-Promotion/Stage/Warehouse counters) as of chart 1.11.2 - controller, managementController, and webhooksServer only emit generic controller-runtime/workqueue/Go-runtime instrumentation (api and garbageCollector expose no metrics at all). The 'controller' label on these generic metrics does map to real Kargo resource types (promotion/stage/warehouse/control_flow_stage on the main controller; project/projectconfig/namespace/etc. on the management controller), so reconcile rate/errors/latency per resource type is still a genuine signal - just not promotion counts or freight/verification outcomes. Recheck against a newer Kargo version if this matters more once real Warehouses/Stages exist.",
+  "description": "Kargo's controller, managementController, and webhooksServer expose generic controller-runtime/workqueue/Go-runtime instrumentation. The chart at v1.12.5 also exposes kargo_stages_by_ready_reason, a Stage readiness gauge grouped by project and Ready-condition reason. It does not expose promotion counts or verification history/outcomes.",
   "tags": ["kargo", "monitoring", "prometheus"],
   "timezone": "browser",
   "schemaVersion": 39,
@@ -380,6 +380,32 @@
       "title": "Goroutines",
       "type": "timeseries",
       "id": 12
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Number of Kargo Stages by project and Ready-condition reason. Control-flow Stages are omitted by Kargo.\n",
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 39 },
+      "options": {
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (project, reason) (kargo_stages_by_ready_reason)\n",
+          "instant": false,
+          "legendFormat": "{{project}} / {{reason}}",
+          "range": true
+        }
+      ],
+      "title": "Stages by readiness reason",
+      "type": "timeseries",
+      "id": 13
     }
   ]
 }

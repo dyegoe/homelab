@@ -1590,16 +1590,14 @@ official upstream mixins (`grafana/loki`'s `loki-mixin`, `grafana/alloy`'s `allo
   multi-cluster `cluster`/`namespace`/`job` template variables collapsed to a single `pod` selector,
   since this Prometheus never sets a `cluster` label on Alloy's series — same underlying gap as the
   kubernetes-mixin one above, just resolved per-dashboard here instead of left as a gap.
-- Kargo has no official Grafana dashboard/mixin at all, and — as of chart `1.11.2` — no
-  business-level metrics either (no per-Promotion/Stage/Warehouse counters); only `controller`,
-  `managementController`, and `webhooksServer` expose metrics, and only generic
-  controller-runtime/workqueue/Go-runtime instrumentation (`api` and `garbageCollector` have no
-  metrics support in the chart at all). `addons/kargo/dashboards/kargo-controllers.json` covers
-  reconcile rate/errors/latency and workqueue depth/latency **per Kargo resource type** — the
-  generic reconciler metrics' `controller` label is still set to the real resource name
-  (`promotion`/`stage`/`warehouse`/`control_flow_stage`/`project`/...), so this is a genuine signal,
-  just not promotion counts or verification outcomes. Recheck if a newer Kargo version ever adds
-  business metrics ([#99](https://github.com/dyegoe/homelab/issues/99)).
+- Kargo has no official Grafana dashboard/mixin. The controller in chart `1.12.5` also exposes
+  `kargo_stages_by_ready_reason`, a gauge counting Stages by project and Ready-condition reason
+  (control-flow Stages are omitted). The `addons/kargo/dashboards/kargo-controllers.json` dashboard
+  includes it alongside the generic controller-runtime/workqueue/Go-runtime signals; those
+  reconcile metrics' `controller` label maps to actual Kargo resource types
+  (`promotion`/`stage`/`warehouse`/`control_flow_stage`/`project`/...). The readiness gauge is useful
+  business-level signal, but Kargo still exposes no promotion counts or verification history/
+  outcomes. The `api` and `garbageCollector` components have no metrics support in the chart.
 
 Every panel's PromQL was checked against live Prometheus metric names before writing, not assumed.
 
