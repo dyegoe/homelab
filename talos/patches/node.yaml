@@ -1,4 +1,4 @@
-# Cluster-wide Talos config patch: kubelet, VIP and log shipping. Referenced from
+# Cluster-wide Talos config patch: kubelet, VIP, DNS search domains and log shipping. Referenced from
 # talos/cluster.yaml (ConfigPatch 110-k8s-nodes-ee-node).
 ---
 machine:
@@ -33,3 +33,11 @@ apiVersion: v1alpha1
 kind: KmsgLogConfig
 name: talos-kernel-logs
 url: tcp://172.31.100.2:5140/
+---
+# Keep node and pod DNS search domains limited to Kubernetes; DHCP/hostname domains are unsafe for
+# musl clients when external domains receive compact DNSSEC denial responses.
+apiVersion: v1alpha1
+kind: ResolverConfig
+searchDomains:
+  domains: []
+  disableDefault: true
