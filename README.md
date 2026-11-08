@@ -432,12 +432,18 @@ Then check:
 
 **Clean up afterwards**:
 
-- The pods killed by the shutdown stay behind as `Failed`/`Error`, each already replaced. Pod GC
-  only collects terminated pods past `--terminated-pod-gc-threshold` (default 12500), so delete
-  them:
+- The pods killed by the shutdown stay behind, each already replaced. Containers that exited
+  non-zero leave `Failed`/`Error` pods; those that exited 0 on SIGTERM leave `Succeeded`/`Completed`
+  ones (31 on 2026-11-08, e.g. argocd-server, cert-manager, website). Pod GC only collects
+  terminated pods past `--terminated-pod-gc-threshold` (default 12500), so delete both. For
+  `Succeeded`, only delete the ReplicaSet-owned pods: Job pods (e.g. `omni-backup-check` runs) are
+  `Succeeded` too, and their history and logs are worth keeping.
 
   ```bash
   kubectl delete pods -A --field-selector=status.phase=Failed
+  kubectl get pods -A --field-selector=status.phase=Succeeded \
+    -o jsonpath='{range .items[?(@.metadata.ownerReferences[0].kind=="ReplicaSet")]}{.metadata.namespace} {.metadata.name}{"\n"}{end}' \
+    | while read -r ns name; do kubectl -n "$ns" delete pod "$name"; done
   ```
 
 - Whichever node is Ready first takes most of the pods (70 / 19 / 14 on 2026-11-08), and the
