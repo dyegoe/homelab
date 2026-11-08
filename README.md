@@ -87,6 +87,7 @@ are closed as _not planned_, so the reasoning stays searchable. The longer write
     - [Network CNI](#network-cni)
   - [Omni (cluster management)](#omni-cluster-management)
     - [Etcd backups](#etcd-backups)
+  - [Full cluster shutdown](#full-cluster-shutdown)
   - [Cluster Upgrades](#cluster-upgrades)
     - [Upgrading Talos Linux](#upgrading-talos-linux)
       - [Known issue (resolved): kexec reboot hung a node during upgrades](#known-issue-resolved-kexec-reboot-hung-a-node-during-upgrades)
@@ -373,6 +374,80 @@ current time, as in the [docs](https://docs.siderolabs.com/omni/cluster-manageme
 To restore, follow
 [Restore etcd of a cluster managed by cluster templates](https://docs.siderolabs.com/omni/cluster-management/restore-etcd-of-a-cluster-managed-by-cluster-templates).
 It recreates the cluster from the template with a `bootstrapSpec` that points at the snapshot.
+
+## Full cluster shutdown
+
+For powering off all three nodes at once (moving hardware, power work). Last used 2026-11-08 to
+move the nodes into the wall rack. It's mutating, so the user runs it.
+
+**Why `--force`**: by default `talosctl shutdown` cordons and drains the node first. That works for
+one node, not all three. After the second node goes down, etcd has 1 of 3 members and no quorum, so
+the API is gone and the last drain can't finish. The last node also has nowhere to evict to, and
+Longhorn's instance-manager PodDisruptionBudgets block its drain anyway. `--force` skips the
+cordon/drain. The kubelet still terminates pods ("Pod was terminated in response to imminent node
+shutdown"), and Longhorn reattaches the volumes on boot.
+
+**Before**: start from a healthy cluster (every node Ready, every Longhorn volume `healthy`). A
+local etcd snapshot is cheap insurance, since the Omni [backups](#etcd-backups) only restore
+through Omni:
+
+```bash
+kubectl get nodes
+kubectl -n longhorn-system get volumes.longhorn.io
+talosctl -n 172.31.86.11 etcd snapshot ./etcd-pre-shutdown-$(date +%F).db
+```
+
+**Shut down** all three together:
+
+```bash
+talosctl -n 172.31.86.11,172.31.86.12,172.31.86.13 shutdown --force
+```
+
+Wait until all three are off before unplugging. Omni shows the machines as disconnected, and
+there are no Telegram alerts, since Alertmanager runs in the cluster.
+
+**While moving**: the new switch ports must carry VLAN 86 (static IPs and the `172.31.86.10` VIP
+depend on it), and each node keeps its own install disk (`/dev/nvme0n1`).
+
+**Power on** all three at about the same time: etcd needs 2 of 3 members before the API answers.
+Then check:
+
+1. Nodes Ready, and etcd has all 3 members, none stuck as a learner:
+   `talosctl -n 172.31.86.11 etcd members`
+2. Longhorn volumes back to `healthy` (`degraded` while a replica rebuilds is fine).
+3. Cilium BGP is `established` to the Mikrotik on every node, and the LoadBalancer services have
+   their `172.31.100.x` IPs:
+
+   ```bash
+   for p in $(kubectl -n kube-system get pods -l k8s-app=cilium -o name); do
+     kubectl -n kube-system exec "$p" -c cilium-agent -- cilium shell -- bgp/peers
+   done
+   kubectl get svc -A --field-selector spec.type=LoadBalancer
+   ```
+
+4. ArgoCD apps Synced/Healthy.
+5. Every ExternalSecret `SecretSynced`. An outage is exactly what can wedge the 1Password SDK; if
+   they stay NotReady, see
+   [Known issue: SDK WASM instance wedges after a network error](#known-issue-sdk-wasm-instance-wedges-after-a-network-error-recheck-when-onepassword-sdk-go-moves-past-v041).
+
+**Clean up afterwards**:
+
+- The pods killed by the shutdown stay behind as `Failed`/`Error`, each already replaced. Pod GC
+  only collects terminated pods past `--terminated-pod-gc-threshold` (default 12500), so delete
+  them:
+
+  ```bash
+  kubectl delete pods -A --field-selector=status.phase=Failed
+  ```
+
+- Whichever node is Ready first takes most of the pods (70 / 19 / 14 on 2026-11-08), and the
+  scheduler never rebalances running pods. That's harmless: Renovate rollouts and the next Talos
+  upgrade's drains spread them again. To even out the multi-replica Longhorn CSI sidecars now:
+
+  ```bash
+  kubectl -n longhorn-system rollout restart \
+    deploy/csi-attacher deploy/csi-provisioner deploy/csi-resizer deploy/csi-snapshotter
+  ```
 
 ## Cluster Upgrades
 
