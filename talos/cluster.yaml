@@ -20,7 +20,7 @@ kubernetes:
       interval: 30s
       file: healthchecks/longhorn-volumes.yaml
 talos:
-  version: v1.14.5
+  version: v1.14.6
 features:
   disablePublicDiscoveryService: false
   # Daily etcd snapshot to the R2 bucket in talos/omni-resources/etcd-backup-s3-config.yaml (applied
