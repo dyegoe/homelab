@@ -1,4 +1,4 @@
-FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:158a9044f9dc0777f098b76c8b54346f6ed4560b9a6a416dec7a5ba3bc483af4
+FROM public.ecr.aws/amazonlinux/amazonlinux:2027-minimal@sha256:7ad9f2710a576f99866d9a21695d1225b3ead6e48bd6ad93cd032a9c63245854
 
 ARG EMULATOR_VERSION=1.0.341
 RUN microdnf swap -y gnupg2-minimal gnupg2 && microdnf clean all && \
