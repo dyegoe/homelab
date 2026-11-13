@@ -1,0 +1,16 @@
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: aws-emulator
+spec:
+  endpointSelector:
+    matchLabels:
+      app: aws-emulator
+  ingress:
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP

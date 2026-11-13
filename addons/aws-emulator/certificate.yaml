@@ -1,0 +1,12 @@
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: aws-emulator-backend
+spec:
+  secretName: aws-emulator-backend-tls
+  dnsNames:
+    - aws.nodes.ee
+  issuerRef:
+    name: letsencrypt-cloudflare-prod
+    kind: ClusterIssuer

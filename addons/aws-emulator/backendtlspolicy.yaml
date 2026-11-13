@@ -1,0 +1,17 @@
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: aws-emulator
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: aws-emulator
+      sectionName: https
+  validation:
+    hostname: aws.nodes.ee
+    caCertificateRefs:
+      - group: ""
+        kind: ConfigMap
+        name: aws-emulator-backend-ca
