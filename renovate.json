@@ -63,6 +63,22 @@
   ],
   "packageRules": [
     {
+      "description": "Keep the AWS Emulator base image on Amazon Linux 2023; allow digest updates",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchFileNames": [
+        "addons/aws-emulator/Dockerfile"
+      ],
+      "matchPackageNames": [
+        "public.ecr.aws/amazonlinux/amazonlinux"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    },
+    {
       "description": "Kubernetes version bumps land as one kubernetes (Omni) PR, applied with omnictl cluster template sync",
       "matchDepNames": [
         "ghcr.io/siderolabs/kubelet"
