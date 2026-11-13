@@ -105,6 +105,8 @@ are closed as _not planned_, so the reasoning stays searchable. The longer write
     - [Adding a new standalone app via Kargo](#adding-a-new-standalone-app-via-kargo)
     - [Rotating the ArgoCD repo credential](#rotating-the-argocd-repo-credential)
     - [Forcing an immediate refresh (GitHub webhook)](#forcing-an-immediate-refresh-github-webhook)
+  - [AWS Emulator](#aws-emulator)
+    - [Terraform S3 example](#terraform-s3-example)
   - [Advanced Networking](#advanced-networking)
     - [Mikrotik BGP configuration](#mikrotik-bgp-configuration)
   - [External Secrets Operator](#external-secrets-operator)
@@ -1215,6 +1217,115 @@ value and update the GitHub webhook's secret to match.
 
 **Verify:** push a change to `apps/*/config.json` (or any tracked path) and confirm the
 corresponding `Application`/`ApplicationSet` reconciles within seconds instead of minutes.
+
+## AWS Emulator
+
+The experimental [AWS Emulator](https://github.com/aws/aws-emulator) runs as a single disposable
+pod in `aws-emulator`, reached at `https://aws.nodes.ee` through the internal Gateway. ExternalDNS
+creates the DNS record; a publicly resolvable name pointing to a private address is not an access
+control. Keep the Gateway and Cloudflare Tunnel restricted to the trusted network. Authentication is
+on, telemetry is off, and only test data belongs here.
+
+The Gateway terminates TLS with `*.nodes.ee`, then verifies the sidecar's cert-manager certificate
+against ISRG Root X1. The sidecar verifies the emulator's ephemeral certificate over pod loopback.
+Cilium permits Gateway ingress to the sidecar, while the emulator itself listens only on loopback.
+Other clients that can reach the Gateway can still reach the API. Neither the emulator nor its
+simulated IAM behavior is suitable for production or security testing.
+
+**State is not persistent:** every emulator restart, rollout, OOM, node drain or backend certificate
+renewal can discard all resources and generate new credentials. Terraform state is separate and can
+then be stale. Use an isolated local workspace, reacquire credentials after every restart, and replan.
+EKS API responses are simulated; they do not create a Kubernetes control plane or nodes.
+
+AWS publishes packages but not a container image. `addons/aws-emulator/Dockerfile` verifies the
+package signature; `.github/workflows/aws-emulator-image.yml` publishes the image to GHCR on merge.
+For updates, bump the pinned package, merge the image build, then update the Deployment to the
+published tag and digest. AWS only supplies security fixes in its latest release. The proxy uses a
+pinned image and reloads its upstream trust when the emulator's certificate changes.
+
+### Terraform S3 example
+
+On the laptop, with the Omni Kubernetes context, AWS CLI and Terraform installed, first confirm the
+route and health:
+
+```bash
+kubectl --context nodes-k8s-nodes-ee -n aws-emulator rollout status deployment/aws-emulator
+kubectl --context nodes-k8s-nodes-ee -n aws-emulator get httproute,backendtlspolicy,certificate
+curl --fail https://aws.nodes.ee/__admin/health
+```
+
+The following is a complete **disposable** example: it creates a private temporary directory, copies
+only this emulator run's credentials, isolates AWS settings from your normal profile, creates one
+bucket, checks for drift and destroys it. It never uses an AWS account or a remote Terraform backend.
+The identity check must return `000000000000`; failure stops the example. Replace the sample bucket
+name if it already exists in this emulator.
+
+```bash
+(
+  set -euo pipefail
+  umask 077
+  work=$(mktemp -d)
+  printf 'Temporary workspace: %s\n' "$work"
+  : > "$work/aws-config"
+  : > "$work/terraformrc"
+
+  pod=$(kubectl --context nodes-k8s-nodes-ee -n aws-emulator get pods \
+    -l app=aws-emulator -o jsonpath='{.items[0].metadata.name}')
+  test -n "$pod"
+  before=$(kubectl --context nodes-k8s-nodes-ee -n aws-emulator get pod "$pod" \
+    -o jsonpath='{.metadata.uid}:{.status.containerStatuses[?(@.name=="emulator")].restartCount}')
+  kubectl --context nodes-k8s-nodes-ee -n aws-emulator exec "$pod" -c emulator -- \
+    cat /home/emulator/.aws/emulator/9297/emulator_credentials > "$work/credentials"
+  after=$(kubectl --context nodes-k8s-nodes-ee -n aws-emulator get pod "$pod" \
+    -o jsonpath='{.metadata.uid}:{.status.containerStatuses[?(@.name=="emulator")].restartCount}')
+  test -n "$before" && test "$before" = "$after"
+
+  cat > "$work/main.tf" <<'EOF'
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "5.100.0"
+    }
+  }
+}
+provider "aws" {
+  region                  = "us-east-1"
+  s3_use_path_style       = true
+  skip_metadata_api_check = true
+  allowed_account_ids     = ["000000000000"]
+}
+resource "aws_s3_bucket" "example" {
+  bucket = "homelab-emulator-example"
+}
+EOF
+
+  emulator() {
+    env -i PATH="$PATH" HOME="$HOME" \
+      AWS_CONFIG_FILE="$work/aws-config" AWS_SHARED_CREDENTIALS_FILE="$work/credentials" \
+      AWS_ENDPOINT_URL=https://aws.nodes.ee AWS_EC2_METADATA_DISABLED=true \
+      AWS_REGION=us-east-1 AWS_DEFAULT_REGION=us-east-1 \
+      TF_CLI_CONFIG_FILE="$work/terraformrc" "$@"
+  }
+  account=$(emulator aws sts get-caller-identity --query Account --output text)
+  test "$account" = 000000000000
+  emulator terraform -chdir="$work" init -input=false
+  emulator terraform -chdir="$work" plan -input=false
+  emulator terraform -chdir="$work" apply -auto-approve -input=false
+  emulator aws s3api list-buckets
+  emulator terraform -chdir="$work" plan -detailed-exitcode -input=false
+  emulator terraform -chdir="$work" destroy -auto-approve -input=false
+)
+```
+
+The workspace path is printed so it can be inspected and removed after use; it contains the emulator
+credentials and local Terraform state. Do not copy it into this repository. If the pod restarts during
+the example, stop, retrieve the new credentials and replan against the now-empty emulator. Do not
+reuse another project's state.
+
+The S3 example pins AWS provider `5.100.0`: with `6.70.0`, a bucket refresh calls S3 Control using an
+account-prefixed hostname, which the emulator does not support. See [#209](https://github.com/dyegoe/homelab/issues/209)
+for the recheck trigger. Other services and provider versions require their own compatibility tests.
 
 ## Advanced Networking
 
