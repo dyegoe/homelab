@@ -23,4 +23,3 @@ resources:
   - kargo.yaml
   - argo-rollouts.yaml
   - omni-backup-check.yaml
-  - aws-emulator.yaml
