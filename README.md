@@ -1381,17 +1381,26 @@ it, two things have to line up:
    real example already using this pattern (extracting the whole item, `.dockerconfigjson` field
    included).
 
-Generate that JSON blob with `kubectl` (`--dry-run=client` never touches the cluster) and a PAT
-pulled straight from the same 1Password item, then paste the output into the `.dockerconfigjson`
-field on that item:
+Each app has its own classic PAT (`read:packages`) and its own 1Password item, named
+`homelab-gh-pat-registry-ghcr-<app>` (the `onepassword.imageItem` in `apps/<app>/config.json`), so
+renewing one app's token never touches another's. Generate that JSON blob with `kubectl`
+(`--dry-run=client` never touches the cluster) and the PAT pulled straight from the same 1Password
+item, then paste the output into the `.dockerconfigjson` field on that item:
 
 ```bash
+ITEM=homelab-gh-pat-registry-ghcr-<app>
 kubectl create secret docker-registry ghcr-pull \
   --docker-server=ghcr.io \
-  --docker-username=$(op item get "homelab-gh-pat-registry-ghcr" --fields username) \
-  --docker-password=$(op item get "homelab-gh-pat-registry-ghcr" --fields password --reveal) \
+  --docker-username=$(op item get "$ITEM" --fields username) \
+  --docker-password=$(op item get "$ITEM" --fields password --reveal) \
   --dry-run=client -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d
 ```
+
+After renewing a PAT, ESO only picks it up on the next `refreshInterval` (1h). To apply it now,
+force-sync the app's ExternalSecrets (`kargo-image-auth` in `<app>`, `ghcr-pull` in `<app>-dev`/
+`<app>-prd`) with `kubectl annotate externalsecret -n <ns> <name> force-sync=$(date +%s)
+--overwrite`, then make the Warehouse retry with `kubectl annotate warehouse -n <app> <app>
+kargo.akuity.io/refresh=$(date +%s) --overwrite` (after failures it backs off for several minutes).
 
 Kustomize/ArgoCD only ever render the `ExternalSecret` pointer above — it carries no secret material.
 The real Secret is materialized afterward, in-cluster, when ESO reconciles that resource against
