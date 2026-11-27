@@ -1769,6 +1769,23 @@ longhorn-backup`. The old PVC must be deleted first (its PV stays, being `Retain
 The same steps without 5-6 are the **restore drill**: restore the latest backup of any opted-in
 volume into a throwaway volume, mount it with a scratch pod, check the data, delete both.
 
+### Volume health alerts
+
+[`prometheusrule-longhorn-volumes.yaml`](addons/longhorn/prometheusrule-longhorn-volumes.yaml)
+(#244) sends two alerts to Telegram:
+
+- `LonghornVolumeDegraded` (warning) fires when a volume has been degraded for **30 minutes**. Every
+  node reboot degrades the volumes that had a replica on that node until the replica rebuilds. In
+  the Talos upgrades that took up to ~9 minutes, so 30m only fires for a rebuild that's stuck or a
+  node that stays down.
+- `LonghornVolumeFaulted` (critical) fires when a volume has no healthy replica left.
+
+Since Longhorn v1.11.0, `longhorn_volume_robustness` (and `longhorn_volume_state`) put the state in
+a `state` label, one series per value, set to 1 on the current state and 0 on the others
+([longhorn#10723](https://github.com/longhorn/longhorn/issues/10723)). Always filter on `state`,
+e.g. `longhorn_volume_robustness{state="degraded"} == 1`. A plain `max(longhorn_volume_robustness)`
+is always 1, which once made the metric look stuck on healthy during upgrades.
+
 ### Known issue: removed system snapshot never purged, volume uses ~2x its size (recheck on the next Longhorn upgrade or replica rebuild)
 
 **Status: open, mitigated by a nightly `snapshot-cleanup` RecurringJob (see Mitigation below); the
