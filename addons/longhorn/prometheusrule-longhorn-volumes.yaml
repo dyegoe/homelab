@@ -1,0 +1,65 @@
+# Picked up by kube-prometheus-stack's Prometheus from any namespace (ruleSelectorNilUsesHelmValues:
+# false), same as prometheusrule-longhorn-backup.yaml. Tracking issue: #244.
+#
+# Metric semantics changed in Longhorn v1.11.0 (longhorn/longhorn#10723): longhorn_volume_robustness
+# is no longer a number from 0 to 3. Every volume gets one series per robustness value, in the `state`
+# label (unknown/healthy/degraded/faulted), and the value is 1 on the current state and 0 on the others
+# (longhorn-manager v1.13.0 metrics_collector/volume_collector.go, collectVolumeRobustness). Never
+# aggregate it without filtering on `state`: max() over all four series is always 1. Detached volumes
+# report `unknown`, so they're ignored here.
+#
+# Only the longhorn-manager that owns a volume exports it. When a node reboots, ownership moves and two
+# managers can export the same volume for a scrape or two. `max by (volume, ...)` drops the `node`/`pod`
+# labels so each volume is one alert, and a stale `healthy` from the old owner can't hide a `degraded`
+# from the new one.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: longhorn-volumes
+  namespace: longhorn-system
+  labels:
+    app.kubernetes.io/name: longhorn
+    app.kubernetes.io/instance: longhorn
+    app.kubernetes.io/managed-by: argocd
+spec:
+  groups:
+    - name: longhorn-volumes
+      rules:
+        - alert: LonghornVolumeDegraded
+          # Every node reboot (Talos upgrades included) degrades the volumes that had a replica on
+          # that node until the replica rebuilds. Talos upgrades on 2026-11-12 and 2026-11-27: the
+          # slowest rebuild took ~9 minutes (pvc-4d4454f9, 50 GiB). If a node stays down,
+          # replica-replenishment-wait-interval (600s) passes before Longhorn rebuilds elsewhere.
+          # 30m covers both with margin, so it only fires when a rebuild is stuck or a node stays down.
+          expr: |
+            max by (volume, pvc, pvc_namespace) (
+              longhorn_volume_robustness{job="longhorn-backend", state="degraded"}
+            ) == 1
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: Longhorn volume {{ $labels.pvc_namespace }}/{{ $labels.pvc }} is degraded
+            description: >-
+              Volume {{ $labels.volume }} (PVC {{ $labels.pvc_namespace }}/{{ $labels.pvc }}) has
+              been running with fewer healthy replicas than configured for more than 30 minutes.
+              Check `kubectl -n longhorn-system get replicas.longhorn.io -l longhornvolume={{ $labels.volume }}`
+              and the Longhorn UI for a stuck rebuild, a node that's down, or a disk that's full or
+              unschedulable. Another node reboot now could leave the volume with no healthy replica.
+        - alert: LonghornVolumeFaulted
+          # Faulted means no healthy replica is left: the volume is unusable until it's salvaged or
+          # restored from backup. Nothing normal causes it, so 2m only skips a single bad scrape.
+          expr: |
+            max by (volume, pvc, pvc_namespace) (
+              longhorn_volume_robustness{job="longhorn-backend", state="faulted"}
+            ) == 1
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: Longhorn volume {{ $labels.pvc_namespace }}/{{ $labels.pvc }} is faulted
+            description: >-
+              Volume {{ $labels.volume }} (PVC {{ $labels.pvc_namespace }}/{{ $labels.pvc }}) has no
+              healthy replica left, so its workload can't read or write it. See the Longhorn docs on
+              salvaging a faulted volume, or restore from the latest R2 backup.
+            runbook_url: https://github.com/dyegoe/homelab/blob/main/README.md#backups-cloudflare-r2
