@@ -927,6 +927,7 @@ Adding an app is one `config.json` plus the 1Password items it references — th
 | `alloy`                         | `0`       | yes       | Log shipping - pods via the Kubernetes API, Talos's own logs via a LoadBalancer Service                                                                                          |
 | `cloudnative-pg`                | `0`       | yes       | CloudNativePG Postgres operator (`cnpg-system` namespace) - webhook `caBundle` is self-managed by the operator at runtime, so it's excluded via `ignoreDifferences`              |
 | `omni-backup-check`             | `0`       | yes       | CronJob that fails (→ `KubeJobFailed`) when Omni's etcd backups stop landing in R2 — see [Etcd backups](#etcd-backups)                                                           |
+| `plugin-barman-cloud`           | `1`       | yes       | CNPG-I Barman Cloud backup plugin (`cnpg-system`) - after `cloudnative-pg` (needs its CRDs) and `cert-manager` (chart creates an `Issuer` + mTLS `Certificate`s)                 |
 | `kargo`                         | `1`       | yes       | Platform; the hosted apps (`website`, `helloworld`, `catering-calculator`) are provisioned via `charts/tenant` — see [Kargo](#kargo)                                             |
 
 ### Renovate
