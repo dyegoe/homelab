@@ -123,7 +123,7 @@ are closed as _not planned_, so the reasoning stays searchable. The longer write
     - [Known log noise (resolved in Kubernetes v1.37)](#known-log-noise-resolved-in-kubernetes-v137)
   - [Storage (Longhorn)](#storage-longhorn)
     - [Backups (Cloudflare R2)](#backups-cloudflare-r2)
-    - [Known issue: removed system snapshot never purged, volume uses ~2x its size (recheck on the next Longhorn upgrade or replica rebuild)](#known-issue-removed-system-snapshot-never-purged-volume-uses-2x-its-size-recheck-on-the-next-longhorn-upgrade-or-replica-rebuild)
+    - [Known issue (mitigated): removed system snapshot never purged, volume uses ~2x its size](#known-issue-mitigated-removed-system-snapshot-never-purged-volume-uses-2x-its-size)
   - [Bootstrap sequence summary](#bootstrap-sequence-summary)
   - [Development (pre-commit hooks)](#development-pre-commit-hooks)
 
@@ -1786,10 +1786,13 @@ a `state` label, one series per value, set to 1 on the current state and 0 on th
 e.g. `longhorn_volume_robustness{state="degraded"} == 1`. A plain `max(longhorn_volume_robustness)`
 is always 1, which once made the metric look stuck on healthy during upgrades.
 
-### Known issue: removed system snapshot never purged, volume uses ~2x its size (recheck on the next Longhorn upgrade or replica rebuild)
+### Known issue (mitigated): removed system snapshot never purged, volume uses ~2x its size
 
-**Status: open, mitigated by a nightly `snapshot-cleanup` RecurringJob (see Mitigation below); the
-leftover snapshot is upstream design, only the stalled 09-04 prune is unexplained.** Tracked in
+**Status: closed 2026-11-28, mitigated by a nightly `snapshot-cleanup` RecurringJob (see Mitigation
+below); the leftover snapshot is upstream design, only the stalled 09-04 prune is unexplained.** The
+mitigation held through the 2026-11-27 Talos v1.14.7 upgrade's replica rebuilds: the next 03:00 run
+completed, and the Prometheus volume's `actualSize` went from 53.5 GB back to 49.3 GB (~1x its
+50 GiB). The leftover `markRemoved` snapshots are still there, as expected. Tracked in
 [#93](https://github.com/dyegoe/homelab/issues/93), which also has the evidence from the **2026-10-12 recurrence** (every volume left with a
 removed-but-unmerged base snapshot after the Talos upgrade's replica rebuilds). On 2026-09-30 the
 Prometheus volume (`pvc-4d4454f9-99b0-409e-bd4f-43dd9158143b`, 50 GiB) showed an actual size of
