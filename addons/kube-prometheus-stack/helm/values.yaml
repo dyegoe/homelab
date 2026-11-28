@@ -40,15 +40,6 @@ prometheus:
     # for the link to actually resolve when tapped from Telegram.
     externalUrl: https://prometheus.nodes.ee
     retention: 15d
-    # Workaround for prometheus/alertmanager#5743. Alertmanager 0.35.0 closes idle keep-alive
-    # connections after a fixed 90s. With a 30s evaluation interval and the default 1m resend
-    # delay, Prometheus resends a long-firing alert (Watchdog) every 90s, because the resend check
-    # is a strict "<". The POST then races the close, fails with EOF and is dropped, which fires
-    # PrometheusErrorSendingAlertsTo*. 45s moves resends to every 60s.
-    # Remove once an Alertmanager release includes the fix (#5744). Tracked in dyegoe/homelab#228.
-    rules:
-      alert:
-        resendDelay: 45s
     # externalLabels only label data leaving this Prometheus (alerts sent to Alertmanager,
     # federation, remote-write). Locally queried series don't get it, so it alone doesn't feed
     # the kubernetes-mixin dashboards' $cluster variable. That's the scrapeClasses entry below.
