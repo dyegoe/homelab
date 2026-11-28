@@ -1,0 +1,40 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: plugin-barman-cloud
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: addons
+  sources:
+    - repoURL: https://cloudnative-pg.io/charts
+      chart: plugin-barman-cloud
+      targetRevision: 0.9.0
+      helm:
+        releaseName: plugin-barman-cloud
+        valueFiles:
+          - $values/addons/plugin-barman-cloud/helm/values.yaml
+    # Source to provide references for Helm values
+    - repoURL: https://github.com/dyegoe/homelab.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
